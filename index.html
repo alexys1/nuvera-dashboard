@@ -285,6 +285,32 @@
   @keyframes toast-in { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
   .toast.fade-out { animation: toast-out 0.3s ease-in forwards; }
   @keyframes toast-out { to { transform: translateX(20px); opacity: 0; } }
+
+  /* ---------- Mi Capital (distribución) ---------- */
+  .cb-panel { border-color: rgba(0,255,136,0.18); }
+  .cb-total-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .cb-total-row .cb-total-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .cb-total-row .cb-total-value { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .cb-bars { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+  .cb-bar-row { display: grid; grid-template-columns: 120px 1fr 90px; align-items: center; gap: 10px; font-size: 13px; }
+  .cb-bar-label { color: var(--text-secondary); white-space: nowrap; }
+  .cb-bar-track { height: 14px; border-radius: 7px; background: rgba(255,255,255,0.06); overflow: hidden; border: 1px solid var(--border); }
+  .cb-bar-fill { height: 100%; border-radius: 7px; transition: width 0.4s ease; }
+  .cb-bar-fill.libre { background: linear-gradient(90deg, #2b9dff, var(--accent-2)); }
+  .cb-bar-fill.invertido { background: linear-gradient(90deg, #d9a72b, var(--warning)); }
+  .cb-bar-fill.fondo { background: linear-gradient(90deg, #00c46a, var(--accent)); }
+  .cb-bar-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .cb-fondo-note { font-size: 11px; color: var(--text-muted); margin: -6px 0 16px; }
+  .cb-slots-title { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+  .cb-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .cb-slot-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px;
+  }
+  .cb-slot-card.invertido { border-color: rgba(240,160,32,0.35); }
+  .cb-slot-card .cb-slot-pair { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  .cb-slot-card .cb-slot-detail { text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .cb-slot-card .cb-slot-detail strong { color: var(--text-primary); }
 </style>
 </head>
 <body>
@@ -317,6 +343,35 @@
       <div class="last-update" id="last-update">actualizando…</div>
     </div>
   </header>
+
+  <!-- 0. Mi Capital (distribución) -->
+  <section class="panel cb-panel">
+    <h2>💼 Distribución del capital</h2>
+    <div class="cb-total-row">
+      <span class="cb-total-label">Capital Total</span>
+      <span class="cb-total-value mono" id="cb-total">—</span>
+    </div>
+    <div class="cb-bars">
+      <div class="cb-bar-row">
+        <span class="cb-bar-label">💵 Libre</span>
+        <span class="cb-bar-track"><span class="cb-bar-fill libre" id="cb-bar-libre" style="width:0%"></span></span>
+        <span class="cb-bar-value mono" id="cb-libre">—</span>
+      </div>
+      <div class="cb-bar-row">
+        <span class="cb-bar-label">📊 En trades</span>
+        <span class="cb-bar-track"><span class="cb-bar-fill invertido" id="cb-bar-invertido" style="width:0%"></span></span>
+        <span class="cb-bar-value mono" id="cb-invertido">—</span>
+      </div>
+      <div class="cb-bar-row">
+        <span class="cb-bar-label">🏦 Fondo srv</span>
+        <span class="cb-bar-track"><span class="cb-bar-fill fondo" id="cb-bar-fondo" style="width:0%"></span></span>
+        <span class="cb-bar-value mono" id="cb-fondo">—</span>
+      </div>
+    </div>
+    <div class="cb-fondo-note">El fondo servidor es un pozo aparte (se acumula de las ganancias) — no se resta del capital operativo de arriba.</div>
+    <div class="cb-slots-title">Invertido ahora</div>
+    <div class="cb-slots" id="cb-slots"></div>
+  </section>
 
   <!-- 2. Cards principales (5) -->
   <div class="stat-grid">

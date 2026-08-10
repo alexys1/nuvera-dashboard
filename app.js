@@ -176,6 +176,38 @@ function maybeFireConfetti(fondoPct) {
   if (fondoPct < 100) confettiFired = false;
 }
 
+// ---------- Render: distribución del capital (sección "Mi Capital") ----------
+function renderCapitalBreakdown(cb, fondoServidorMeta) {
+  $('cb-total').textContent = fmtUsd(cb.total);
+
+  const libreWidth = cb.total > 0 ? Math.min(Math.max((cb.libre / cb.total) * 100, 0), 100) : 0;
+  const invertidoWidth = cb.total > 0 ? Math.min(Math.max((cb.invertido / cb.total) * 100, 0), 100) : 0;
+  const fondoWidth = fondoServidorMeta > 0 ? Math.min(Math.max((cb.fondoServidor / fondoServidorMeta) * 100, 0), 100) : 0;
+
+  $('cb-bar-libre').style.width = `${libreWidth}%`;
+  $('cb-libre').textContent = fmtUsd(cb.libre);
+  $('cb-bar-invertido').style.width = `${invertidoWidth}%`;
+  $('cb-invertido').textContent = fmtUsd(cb.invertido);
+  $('cb-bar-fondo').style.width = `${fondoWidth}%`;
+  $('cb-fondo').textContent = fmtUsd(cb.fondoServidor);
+
+  const grid = $('cb-slots');
+  grid.innerHTML = '';
+  for (const s of cb.slots) {
+    const label = s.par ? s.par.split('/')[0] : (s.slotKey === 'OPORTUNISTA' ? 'Oportunista' : s.slotKey);
+    const card = document.createElement('div');
+    card.className = `cb-slot-card ${s.estado}`;
+    const detail = s.estado === 'invertido'
+      ? `<strong>${fmtUsd(s.invertido)}</strong> · nivel ${s.niveles.join(',')}`
+      : 'libre';
+    card.innerHTML = `
+      <span class="cb-slot-pair">${s.par ? coinIconHtml(s.par, 18) : '⚡'} ${label}</span>
+      <span class="cb-slot-detail">${detail}</span>
+    `;
+    grid.appendChild(card);
+  }
+}
+
 // ---------- Render: pares activos (cards visuales, sección 4) ----------
 function renderActivePairs(pairs) {
   const grid = $('active-pair-grid');
@@ -510,7 +542,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -520,11 +552,13 @@ async function refreshAll() {
       fetchJson('/api/ai-decisions?limit=5'),
       fetchJson('/api/system'),
       fetchJson('/api/patterns?limit=1'),
+      fetchJson('/api/capital-breakdown'),
     ]);
 
     setConnWarning(false);
     renderStatus(status);
     capitalInicialRef = status.capitalInicial;
+    renderCapitalBreakdown(capitalBreakdown, status.fondoServidorMeta);
     renderPositions(positions);
     renderActivePairs(pairs);
     renderPairsHistory(pairsHistory);

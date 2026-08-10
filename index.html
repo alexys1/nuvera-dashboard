@@ -6,22 +6,27 @@
 <title>NUVERA BOT — Dashboard</title>
 <meta name="description" content="Dashboard en vivo del bot de trading Nuvera (modo paper)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 <style>
   :root {
     --bg: #0d1117;
     --surface: #161b22;
     --surface-2: #1c2330;
+    --surface-3: #232b3a;
     --border: rgba(255,255,255,0.08);
     --text-primary: #e6edf3;
     --text-secondary: #8b949e;
     --text-muted: #6e7681;
     --accent: #00ff88;
     --accent-dim: rgba(0,255,136,0.12);
+    --accent-2: #58a6ff;
+    --accent-2-dim: rgba(88,166,255,0.12);
     --critical: #f85149;
     --critical-dim: rgba(248,81,73,0.12);
     --warning: #f0a020;
+    --warning-dim: rgba(240,160,32,0.12);
     --grid-line: rgba(255,255,255,0.06);
     --radius: 10px;
   }
@@ -36,9 +41,10 @@
   }
   .mono { font-family: 'Roboto Mono', monospace; }
   a { color: var(--accent); }
+  button { font-family: inherit; }
 
   .wrap {
-    max-width: 1180px;
+    max-width: 1280px;
     margin: 0 auto;
     padding: 20px 20px 60px;
   }
@@ -57,8 +63,15 @@
     margin-bottom: 20px;
   }
   .brand { display: flex; align-items: center; gap: 12px; }
-  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .brand h1 { font-size: 18px; letter-spacing: 0.06em; margin: 0; font-weight: 700; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: blink 2s ease-in-out infinite; }
+  .brand .dot.paused { animation: none; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .brand h1 { font-size: 18px; letter-spacing: 0.06em; margin: 0; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+  .brand h1 .bolt { display: inline-block; animation: pulse-glow 2.4s ease-in-out infinite; filter: drop-shadow(0 0 0 var(--accent)); }
+  @keyframes pulse-glow {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(0,255,136,0.5)); }
+    50% { transform: scale(1.15); filter: drop-shadow(0 0 8px rgba(0,255,136,0.9)); }
+  }
   .badge {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
@@ -67,21 +80,25 @@
   .badge.ok { color: var(--accent); border-color: rgba(0,255,136,0.3); background: var(--accent-dim); }
   .badge.paused { color: var(--critical); border-color: rgba(248,81,73,0.3); background: var(--critical-dim); }
   .badge.off { color: var(--text-muted); }
+  .badge.mode-paper { color: var(--accent-2); border-color: rgba(88,166,255,0.3); background: var(--accent-2-dim); }
+  .badge.mode-live { color: var(--critical); border-color: rgba(248,81,73,0.4); background: var(--critical-dim); font-weight: 800; }
 
-  .header-metrics { display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }
+  .header-metrics { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; }
   .header-metric .label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
   .header-metric .value { font-size: 18px; font-weight: 700; }
   .fng-pill { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+  .last-update { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 
   /* ---------- Stat cards ---------- */
   .stat-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 14px;
     margin-bottom: 20px;
   }
-  @media (max-width: 860px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 480px) { .stat-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 640px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 420px) { .stat-grid { grid-template-columns: 1fr; } }
 
   .card {
     background: var(--surface);
@@ -94,6 +111,9 @@
   .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
   .stat-card .value.good { color: var(--accent); }
   .stat-card .value.bad { color: var(--critical); }
+  .stat-card .sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .mini-bar-track { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+  .mini-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 
   /* ---------- Section ---------- */
   section.panel {
@@ -110,8 +130,32 @@
     color: var(--text-secondary);
     margin: 0 0 14px;
     font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
   }
+  .panel-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .empty-msg { color: var(--text-muted); font-size: 13px; padding: 18px 0; text-align: center; }
+
+  .btn-tab {
+    background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-tab:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.2); }
+  .btn-tab.active { background: var(--accent-dim); color: var(--accent); border-color: rgba(0,255,136,0.35); }
+  .btn-icon {
+    background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .btn-icon:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.2); }
+  .search-input {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-primary);
+    border-radius: 6px; padding: 5px 10px; font-size: 12px; width: 150px;
+  }
+  .search-input:focus { outline: none; border-color: rgba(0,255,136,0.35); }
 
   /* ---------- Tables ---------- */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -124,34 +168,74 @@
     letter-spacing: 0.04em;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
+    white-space: nowrap;
   }
   tbody td { padding: 10px 10px; border-bottom: 1px solid var(--grid-line); font-variant-numeric: tabular-nums; }
   tbody tr:last-child td { border-bottom: none; }
   tbody tr:hover { background: rgba(255,255,255,0.02); }
-  .pair-cell { font-weight: 600; }
+  .pair-cell { font-weight: 600; display: flex; align-items: center; gap: 7px; }
   .pnl-pos { color: var(--accent); }
   .pnl-neg { color: var(--critical); }
   .table-scroll { overflow-x: auto; }
   .outcome-tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.03em; }
   .outcome-tag.win { color: var(--accent); background: var(--accent-dim); }
   .outcome-tag.loss { color: var(--critical); background: var(--critical-dim); }
+  .status-tag { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
+  .status-tag.active { color: var(--accent); background: var(--accent-dim); }
+  .status-tag.blacklist { color: var(--critical); background: var(--critical-dim); }
+
+  .coin-icon { border-radius: 50%; display: inline-block; vertical-align: middle; flex-shrink: 0; }
+  .coin-fallback {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--surface-3);
+    color: var(--text-secondary); font-size: 8px; font-weight: 800; display: inline-flex;
+    align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid var(--border);
+  }
+
+  .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 12px; font-size: 12px; color: var(--text-secondary); }
 
   /* ---------- Chart ---------- */
   .chart-wrap { position: relative; height: 260px; }
 
-  /* ---------- Pair stat cards ---------- */
-  .pair-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-  .pair-stat-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
-  .pair-stat-card .pair-name { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
-  .pair-stat-card .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
-  .pair-stat-card .wr { font-variant-numeric: tabular-nums; }
-  .health-bar-track { height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; margin-top: 8px; overflow: hidden; }
-  .health-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+  /* ---------- Pares activos (cards visuales) ---------- */
+  .active-pair-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+  .active-pair-card {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .active-pair-card .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .active-pair-card .pair-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .active-pair-card .fng-tag { font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+  .active-pair-card .price-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .active-pair-card .price { font-size: 17px; font-weight: 700; }
+  .active-pair-card .change { font-size: 12px; font-weight: 600; }
+  .active-pair-card .row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-secondary); margin-top: 7px; }
+  .grid-levels { display: flex; gap: 3px; }
+  .grid-levels .lvl { width: 16px; height: 8px; border-radius: 2px; background: rgba(255,255,255,0.1); }
+  .grid-levels .lvl.filled { background: var(--accent); }
+  .stars { letter-spacing: 1px; color: var(--warning); font-size: 11px; }
+  .stars .empty { color: rgba(255,255,255,0.12); }
+
+  /* ---------- Fear & Greed gauge ---------- */
+  .fng-gauge-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .fng-gauge svg { display: block; }
+  .fng-gauge-value { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .fng-gauge-label { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+  .fng-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); width: 220px; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  /* ---------- AI section ---------- */
+  .ai-card { display: flex; gap: 14px; align-items: flex-start; }
+  .ai-card .ai-emoji { font-size: 26px; line-height: 1; }
+  .ai-card .ai-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .ai-card .ai-text { font-size: 14px; color: var(--text-primary); line-height: 1.5; }
+  .ai-confidence-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .ai-confidence-track { flex: 1; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; max-width: 220px; }
+  .ai-confidence-fill { height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+  .ai-hits { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 
   /* ---------- Progress bar (fondo servidor) ---------- */
   .progress-track {
     width: 100%; height: 22px; border-radius: 6px; background: rgba(255,255,255,0.06);
-    overflow: hidden; border: 1px solid var(--border);
+    overflow: hidden; border: 1px solid var(--border); position: relative;
   }
   .progress-fill {
     height: 100%;
@@ -160,12 +244,21 @@
   }
   .progress-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
 
+  /* ---------- Footer ---------- */
   footer.foot {
-    text-align: center;
     color: var(--text-muted);
     font-size: 12px;
-    padding: 20px 0 0;
+    padding: 18px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    justify-content: center;
   }
+  footer.foot span strong { color: var(--text-secondary); font-weight: 600; }
+
   #conn-warning {
     display: none;
     background: var(--critical-dim);
@@ -176,9 +269,26 @@
     font-size: 13px;
     margin-bottom: 20px;
   }
+
+  /* ---------- Toasts (alertas en vivo) ---------- */
+  #toast-stack {
+    position: fixed; top: 16px; right: 16px; z-index: 999;
+    display: flex; flex-direction: column; gap: 8px; max-width: 320px;
+  }
+  .toast {
+    background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 8px; padding: 11px 14px; font-size: 13px; color: var(--text-primary);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    animation: toast-in 0.25s ease-out;
+  }
+  .toast.loss { border-left-color: var(--critical); }
+  @keyframes toast-in { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  .toast.fade-out { animation: toast-out 0.3s ease-in forwards; }
+  @keyframes toast-out { to { transform: translateX(20px); opacity: 0; } }
 </style>
 </head>
 <body>
+<div id="toast-stack"></div>
 <div class="wrap">
 
   <div id="conn-warning">⚠️ No se pudo conectar con la API del bot. Revisá <code>API_BASE</code> en <code>app.js</code>/consola, o que el servidor esté corriendo.</div>
@@ -187,8 +297,9 @@
   <header class="top">
     <div class="brand">
       <span class="dot" id="status-dot"></span>
-      <h1>NUVERA BOT</h1>
+      <h1><span class="bolt">⚡</span> NUVERA BOT</h1>
       <span class="badge off" id="status-badge">cargando…</span>
+      <span class="badge off" id="mode-badge" style="display:none;"></span>
     </div>
     <div class="header-metrics">
       <div class="header-metric">
@@ -203,15 +314,17 @@
         <span>Fear &amp; Greed:</span>
         <strong id="hdr-fng" class="mono">—</strong>
       </div>
+      <div class="last-update" id="last-update">actualizando…</div>
     </div>
   </header>
 
-  <!-- 2. Cards principales -->
+  <!-- 2. Cards principales (5) -->
   <div class="stat-grid">
     <div class="card stat-card">
       <div class="icon">💰</div>
       <div class="label">Capital Total</div>
       <div class="value mono" id="stat-capital">—</div>
+      <div class="sub mono" id="stat-capital-sub">—</div>
     </div>
     <div class="card stat-card">
       <div class="icon">📈</div>
@@ -222,15 +335,29 @@
       <div class="icon">🎯</div>
       <div class="label">Winrate Hoy</div>
       <div class="value mono" id="stat-winrate">—</div>
+      <div class="mini-bar-track"><div class="mini-bar-fill" id="stat-winrate-bar" style="width:0%; background: var(--accent);"></div></div>
     </div>
     <div class="card stat-card">
       <div class="icon">🏦</div>
       <div class="label">Fondo Servidor</div>
       <div class="value mono" id="stat-fondo">—</div>
     </div>
+    <div class="card stat-card">
+      <div class="icon">⚡</div>
+      <div class="label">Trades Hoy</div>
+      <div class="value mono" id="stat-trades-hoy">—</div>
+      <div class="sub mono" id="stat-trades-hoy-sub">—</div>
+    </div>
   </div>
 
-  <!-- 3. Posiciones abiertas -->
+  <!-- 4. Pares activos (cards visuales) -->
+  <section class="panel">
+    <h2>Pares activos</h2>
+    <div class="active-pair-grid" id="active-pair-grid"></div>
+    <div class="empty-msg" id="active-pairs-empty" style="display:none;">Sin pares activos todavía.</div>
+  </section>
+
+  <!-- Posiciones abiertas -->
   <section class="panel">
     <h2>Posiciones abiertas</h2>
     <div class="table-scroll">
@@ -244,36 +371,109 @@
     </div>
   </section>
 
-  <!-- 4. Gráfica de capital -->
+  <!-- 5. Gráfica de capital -->
   <section class="panel">
-    <h2>Capital — últimos 30 días</h2>
+    <h2>
+      <span>Capital</span>
+      <div class="panel-controls" id="chart-zoom-controls">
+        <button class="btn-tab" data-days="7">7d</button>
+        <button class="btn-tab active" data-days="30">30d</button>
+        <button class="btn-tab" data-days="3650">Todo</button>
+      </div>
+    </h2>
     <div class="chart-wrap">
       <canvas id="capital-chart"></canvas>
     </div>
   </section>
 
-  <!-- 5. Últimos trades -->
+  <!-- 6. Tabla de trades -->
   <section class="panel">
-    <h2>Últimos trades</h2>
+    <h2>
+      <span>Trades</span>
+      <div class="panel-controls">
+        <input type="text" class="search-input" id="trades-search" placeholder="Buscar por par…">
+        <button class="btn-tab active" data-range="all">Todo</button>
+        <button class="btn-tab" data-range="today">Hoy</button>
+        <button class="btn-tab" data-range="week">Esta semana</button>
+        <button class="btn-icon" id="btn-export-csv">⬇ CSV</button>
+      </div>
+    </h2>
     <div class="table-scroll">
       <table id="tbl-trades">
         <thead>
-          <tr><th>Par</th><th>Resultado</th><th>PnL</th><th>Duración</th><th>Hora</th></tr>
+          <tr><th>Par</th><th>Tipo</th><th>Entrada</th><th>Salida</th><th>PnL</th><th>Duración</th><th>Hora</th></tr>
         </thead>
         <tbody></tbody>
       </table>
       <div class="empty-msg" id="trades-empty" style="display:none;">Sin trades todavía.</div>
     </div>
+    <div class="pagination" id="trades-pagination"></div>
   </section>
 
-  <!-- 6. Estadísticas por par -->
+  <!-- 7. Estadísticas por par (histórico) -->
   <section class="panel">
-    <h2>Estadísticas por par</h2>
-    <div class="pair-grid" id="pair-grid"></div>
-    <div class="empty-msg" id="pairs-empty" style="display:none;">Sin datos de pares todavía.</div>
+    <h2>
+      <span>Estadísticas por par (histórico)</span>
+      <span class="panel-controls" id="blacklist-summary"></span>
+    </h2>
+    <div class="table-scroll">
+      <table id="tbl-pairs-history">
+        <thead>
+          <tr><th>Par</th><th>Trades</th><th>WR%</th><th>PnL</th><th>Mejor hora</th><th>Estado</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-msg" id="pairs-history-empty" style="display:none;">Sin datos todavía.</div>
+    </div>
   </section>
 
-  <!-- 7. Fondo servidor -->
+  <!-- 8. IA -->
+  <section class="panel">
+    <h2>Última decisión de IA (Groq)</h2>
+    <div class="ai-card" id="ai-card">
+      <div class="ai-emoji">🤖</div>
+      <div style="flex:1;">
+        <div class="ai-meta" id="ai-meta">cargando…</div>
+        <div class="ai-text" id="ai-text">—</div>
+        <div class="ai-confidence-row">
+          <span class="ai-hits" id="ai-confidence-label">Confianza: —</span>
+          <div class="ai-confidence-track"><div class="ai-confidence-fill" id="ai-confidence-fill" style="width:0%;"></div></div>
+          <span class="ai-hits" id="ai-hits">Acertó: —</span>
+        </div>
+      </div>
+    </div>
+    <div class="empty-msg" id="ai-empty" style="display:none;">Sin decisiones de IA todavía.</div>
+  </section>
+
+  <!-- 9. Fear & Greed -->
+  <section class="panel">
+    <h2>Fear &amp; Greed Index</h2>
+    <div class="fng-gauge-wrap">
+      <div class="fng-gauge">
+        <svg width="220" height="120" viewBox="0 0 220 120">
+          <defs>
+            <linearGradient id="fng-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#f85149"/>
+              <stop offset="25%" stop-color="#f0a020"/>
+              <stop offset="50%" stop-color="#e3e34a"/>
+              <stop offset="75%" stop-color="#7ee787"/>
+              <stop offset="100%" stop-color="#00ff88"/>
+            </linearGradient>
+          </defs>
+          <path d="M 15 110 A 95 95 0 0 1 205 110" fill="none" stroke="url(#fng-grad)" stroke-width="16" stroke-linecap="round"/>
+          <line id="fng-needle" x1="110" y1="110" x2="110" y2="30" stroke="#e6edf3" stroke-width="3" stroke-linecap="round" transform="rotate(-90 110 110)"/>
+          <circle cx="110" cy="110" r="6" fill="#e6edf3"/>
+        </svg>
+        <div class="fng-scale"><span>Miedo extremo</span><span>Codicia extrema</span></div>
+      </div>
+      <div>
+        <div class="fng-gauge-value mono" id="fng-value">—</div>
+        <div class="fng-gauge-label" id="fng-label">cargando…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. Fondo servidor -->
   <section class="panel">
     <h2>🏦 Fondo Servidor</h2>
     <div class="progress-track">
@@ -285,8 +485,9 @@
     </div>
   </section>
 
-  <footer class="foot">
-    Nuvera Trading Bot · modo paper · datos de solo lectura · se actualiza cada 30s
+  <!-- 12. Footer -->
+  <footer class="foot" id="system-footer">
+    <span>Nuvera Trading Bot · modo paper · datos de solo lectura · se actualiza cada 30s</span>
   </footer>
 </div>
 

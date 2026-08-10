@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NUVERA BOT — Dashboard</title>
+<meta name="description" content="Dashboard en vivo del bot de trading Nuvera (modo paper)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-2: #1c2330;
+    --border: rgba(255,255,255,0.08);
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --accent: #00ff88;
+    --accent-dim: rgba(0,255,136,0.12);
+    --critical: #f85149;
+    --critical-dim: rgba(248,81,73,0.12);
+    --warning: #f0a020;
+    --grid-line: rgba(255,255,255,0.06);
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'Roboto Mono', monospace; }
+  a { color: var(--accent); }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 20px 20px 60px;
+  }
+
+  /* ---------- Header ---------- */
+  header.top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .brand h1 { font-size: 18px; letter-spacing: 0.06em; margin: 0; font-weight: 700; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border);
+  }
+  .badge.ok { color: var(--accent); border-color: rgba(0,255,136,0.3); background: var(--accent-dim); }
+  .badge.paused { color: var(--critical); border-color: rgba(248,81,73,0.3); background: var(--critical-dim); }
+  .badge.off { color: var(--text-muted); }
+
+  .header-metrics { display: flex; gap: 24px; flex-wrap: wrap; align-items: baseline; }
+  .header-metric .label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .header-metric .value { font-size: 18px; font-weight: 700; }
+  .fng-pill { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+
+  /* ---------- Stat cards ---------- */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 860px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 480px) { .stat-grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+  }
+  .stat-card .icon { font-size: 18px; opacity: 0.9; }
+  .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+  .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .stat-card .value.good { color: var(--accent); }
+  .stat-card .value.bad { color: var(--critical); }
+
+  /* ---------- Section ---------- */
+  section.panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  section.panel h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-secondary);
+    margin: 0 0 14px;
+    font-weight: 600;
+  }
+  .empty-msg { color: var(--text-muted); font-size: 13px; padding: 18px 0; text-align: center; }
+
+  /* ---------- Tables ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody td { padding: 10px 10px; border-bottom: 1px solid var(--grid-line); font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+  .pair-cell { font-weight: 600; }
+  .pnl-pos { color: var(--accent); }
+  .pnl-neg { color: var(--critical); }
+  .table-scroll { overflow-x: auto; }
+  .outcome-tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.03em; }
+  .outcome-tag.win { color: var(--accent); background: var(--accent-dim); }
+  .outcome-tag.loss { color: var(--critical); background: var(--critical-dim); }
+
+  /* ---------- Chart ---------- */
+  .chart-wrap { position: relative; height: 260px; }
+
+  /* ---------- Pair stat cards ---------- */
+  .pair-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .pair-stat-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .pair-stat-card .pair-name { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+  .pair-stat-card .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+  .pair-stat-card .wr { font-variant-numeric: tabular-nums; }
+  .health-bar-track { height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .health-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+
+  /* ---------- Progress bar (fondo servidor) ---------- */
+  .progress-track {
+    width: 100%; height: 22px; border-radius: 6px; background: rgba(255,255,255,0.06);
+    overflow: hidden; border: 1px solid var(--border);
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00c46a, var(--accent));
+    transition: width 0.4s ease;
+  }
+  .progress-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+
+  footer.foot {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 20px 0 0;
+  }
+  #conn-warning {
+    display: none;
+    background: var(--critical-dim);
+    border: 1px solid rgba(248,81,73,0.3);
+    color: var(--critical);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="conn-warning">⚠️ No se pudo conectar con la API del bot. Revisá <code>API_BASE</code> en <code>app.js</code>/consola, o que el servidor esté corriendo.</div>
+
+  <!-- 1. Header -->
+  <header class="top">
+    <div class="brand">
+      <span class="dot" id="status-dot"></span>
+      <h1>NUVERA BOT</h1>
+      <span class="badge off" id="status-badge">cargando…</span>
+    </div>
+    <div class="header-metrics">
+      <div class="header-metric">
+        <div class="label">Capital</div>
+        <div class="value mono" id="hdr-capital">—</div>
+      </div>
+      <div class="header-metric">
+        <div class="label">Variación hoy</div>
+        <div class="value mono" id="hdr-var">—</div>
+      </div>
+      <div class="fng-pill">
+        <span>Fear &amp; Greed:</span>
+        <strong id="hdr-fng" class="mono">—</strong>
+      </div>
+    </div>
+  </header>
+
+  <!-- 2. Cards principales -->
+  <div class="stat-grid">
+    <div class="card stat-card">
+      <div class="icon">💰</div>
+      <div class="label">Capital Total</div>
+      <div class="value mono" id="stat-capital">—</div>
+    </div>
+    <div class="card stat-card">
+      <div class="icon">📈</div>
+      <div class="label">Ganancia Hoy</div>
+      <div class="value mono" id="stat-pnl-hoy">—</div>
+    </div>
+    <div class="card stat-card">
+      <div class="icon">🎯</div>
+      <div class="label">Winrate Hoy</div>
+      <div class="value mono" id="stat-winrate">—</div>
+    </div>
+    <div class="card stat-card">
+      <div class="icon">🏦</div>
+      <div class="label">Fondo Servidor</div>
+      <div class="value mono" id="stat-fondo">—</div>
+    </div>
+  </div>
+
+  <!-- 3. Posiciones abiertas -->
+  <section class="panel">
+    <h2>Posiciones abiertas</h2>
+    <div class="table-scroll">
+      <table id="tbl-positions">
+        <thead>
+          <tr><th>Par</th><th>Nivel</th><th>Entrada</th><th>Actual</th><th>PnL $</th><th>PnL %</th><th>Tiempo</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-msg" id="positions-empty" style="display:none;">Sin posiciones abiertas.</div>
+    </div>
+  </section>
+
+  <!-- 4. Gráfica de capital -->
+  <section class="panel">
+    <h2>Capital — últimos 30 días</h2>
+    <div class="chart-wrap">
+      <canvas id="capital-chart"></canvas>
+    </div>
+  </section>
+
+  <!-- 5. Últimos trades -->
+  <section class="panel">
+    <h2>Últimos trades</h2>
+    <div class="table-scroll">
+      <table id="tbl-trades">
+        <thead>
+          <tr><th>Par</th><th>Resultado</th><th>PnL</th><th>Duración</th><th>Hora</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-msg" id="trades-empty" style="display:none;">Sin trades todavía.</div>
+    </div>
+  </section>
+
+  <!-- 6. Estadísticas por par -->
+  <section class="panel">
+    <h2>Estadísticas por par</h2>
+    <div class="pair-grid" id="pair-grid"></div>
+    <div class="empty-msg" id="pairs-empty" style="display:none;">Sin datos de pares todavía.</div>
+  </section>
+
+  <!-- 7. Fondo servidor -->
+  <section class="panel">
+    <h2>🏦 Fondo Servidor</h2>
+    <div class="progress-track">
+      <div class="progress-fill" id="fondo-progress" style="width:0%"></div>
+    </div>
+    <div class="progress-meta">
+      <span id="fondo-detalle">$0.00 / $0.00 (0%)</span>
+      <span id="fondo-eta">calculando…</span>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Nuvera Trading Bot · modo paper · datos de solo lectura · se actualiza cada 30s
+  </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

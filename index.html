@@ -363,6 +363,26 @@
   .learning:last-child { border-bottom: none; }
   .learning-head { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 11px; margin-bottom: 4px; }
   .learning-text { color: var(--text-primary); line-height: 1.4; }
+
+  /* ---------- Salud del sistema + capital en tiempo real ---------- */
+  .health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .health-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px;
+  }
+  .health-item .hi-name { color: var(--text-secondary); }
+  .health-item .hi-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .health-item.ok { border-color: rgba(0,255,136,0.3); }
+  .health-item.fail { border-color: rgba(248,81,73,0.4); }
+  .health-item.na { opacity: 0.55; }
+  .health-errors-title { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin: 4px 0 10px; }
+  .health-errors { display: flex; flex-direction: column; gap: 8px; }
+  .health-error-row {
+    background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--warning);
+    border-radius: 8px; padding: 8px 12px; font-size: 12px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  }
+  .health-error-row.unresolved { border-left-color: var(--critical); }
+  .health-error-empty { font-size: 13px; color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -627,6 +647,26 @@
     <div class="progress-meta">
       <span id="fondo-detalle">$0.00 / $0.00 (0%)</span>
       <span id="fondo-eta">calculando…</span>
+    </div>
+  </section>
+
+  <!-- 13. Salud del sistema -->
+  <section class="panel" id="health-panel">
+    <h2>🏥 Salud del sistema</h2>
+    <div class="health-grid" id="health-grid"></div>
+    <div class="health-errors-title">⚠️ Errores recientes (últimas 24h)</div>
+    <div id="health-errors" class="health-errors"></div>
+  </section>
+
+  <!-- 14. Capital en tiempo real -->
+  <section class="panel">
+    <h2>📊 Capital en tiempo real</h2>
+    <div class="progress-track">
+      <div class="progress-fill" id="capital-activo-progress" style="width:0%"></div>
+    </div>
+    <div class="progress-meta">
+      <span id="capital-activo-detalle">— / — (—%)</span>
+      <span>Objetivo: &gt;90% siempre trabajando</span>
     </div>
   </section>
 

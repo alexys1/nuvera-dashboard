@@ -503,6 +503,58 @@ function renderSystemFooter(sys) {
   `;
 }
 
+// ---------- Render: salud del sistema (sección 13, GET /api/health) ----------
+function healthItemHtml(name, value, statusClass) {
+  return `<div class="health-item ${statusClass}"><span class="hi-name">${name}</span><span class="hi-value">${value}</span></div>`;
+}
+
+function renderHealth(h) {
+  const grid = $('health-grid');
+  const items = [
+    healthItemHtml('Binance API', h.binance.ok ? `✅ OK (${h.binance.ms ?? '—'}ms)` : '❌ FALLA', h.binance.ok ? 'ok' : 'fail'),
+    healthItemHtml('PostgreSQL', h.postgresql.ok ? `✅ OK (${h.postgresql.tradesGuardados ?? '—'} trades)` : '❌ FALLA', h.postgresql.ok ? 'ok' : 'fail'),
+    healthItemHtml(
+      'Ollama',
+      h.ollama.deshabilitado ? '⚪ deshabilitado' : (h.ollama.ok ? '✅ OK' : '❌ no responde'),
+      h.ollama.deshabilitado ? 'na' : (h.ollama.ok ? 'ok' : 'fail')
+    ),
+    healthItemHtml('Groq (fallback)', h.groq.configurado ? '✅ configurado' : '⚪ no configurado', h.groq.configurado ? 'ok' : 'na'),
+    healthItemHtml('ngrok tunnel', h.ngrok.ok ? '✅ OK' : '❌ caído', h.ngrok.ok ? 'ok' : 'fail'),
+  ];
+
+  for (const p of (h.pausasPorEstrategia || [])) {
+    const hasta = new Date(p.pausadaHasta);
+    items.push(healthItemHtml(`⏸️ ${p.estrategia}`, `pausada hasta ${hasta.toISOString().slice(11, 16)} UTC`, 'fail'));
+  }
+
+  grid.innerHTML = items.join('');
+
+  const errBox = $('health-errors');
+  const recientes = h.errores?.recientes || [];
+  if (recientes.length === 0) {
+    errBox.innerHTML = `<div class="health-error-empty">${h.errores?.total24h ? h.errores.total24h : 0} errores en las últimas 24h — todos resueltos automáticamente.</div>`;
+    return;
+  }
+  errBox.innerHTML = recientes.map((e) => `
+    <div class="health-error-row ${e.resuelto ? '' : 'unresolved'}">
+      <span><strong>${e.tipo}</strong>${e.estrategia ? ` (${e.estrategia})` : ''}: ${e.descripcion}</span>
+      <span class="mono">${e.resuelto ? '✅ auto-resuelto' : '🔄 resolviendo'} · ${e.fecha}</span>
+    </div>
+  `).join('');
+}
+
+// ---------- Render: barra de capital desplegado en vivo (sección 14, GET
+// /api/capital-activo) — el desglose por estrategia ya lo muestra
+// renderCapitalActivo/renderStrategies más arriba, acá solo el % global
+// contra el objetivo (>90% siempre trabajando, ver capitalDeployer.js). ----------
+function renderCapitalActivoBar(ca) {
+  const pct = ca.pct ?? 0;
+  const fill = $('capital-activo-progress');
+  fill.style.width = `${Math.min(pct, 100).toFixed(1)}%`;
+  fill.style.background = pct >= 90 ? 'var(--accent)' : pct >= 60 ? 'var(--warning)' : 'var(--critical)';
+  $('capital-activo-detalle').textContent = `${fmtUsd(ca.enTrades)} / ${fmtUsd(ca.total)} (${pct.toFixed(1)}%)`;
+}
+
 // ---------- Chart: capital histórico (área, color vs capital inicial, zoom) ----------
 let capitalChart = null;
 let capitalInicialRef = null;
@@ -651,7 +703,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -667,6 +719,7 @@ async function refreshAll() {
       fetchJson('/api/market-mood'),
       fetchJson('/api/confidence'),
       fetchJson('/api/learnings?limit=3'),
+      fetchJson('/api/health'),
     ]);
 
     setConnWarning(false);
@@ -674,6 +727,7 @@ async function refreshAll() {
     capitalInicialRef = status.capitalInicial;
     renderCapitalBreakdown(capitalBreakdown, status.fondoServidorMeta);
     renderCapitalActivo(capitalActivo);
+    renderCapitalActivoBar(capitalActivo);
     renderRacha(racha);
     renderMood(mood);
     renderConfidence(confidence);
@@ -685,6 +739,7 @@ async function refreshAll() {
     renderAiDecisions(aiDecisions);
     renderSystemFooter(system);
     renderPatternsNote(patterns);
+    renderHealth(health);
 
     checkForNewTrades(trades);
     allTrades = trades;

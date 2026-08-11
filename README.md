@@ -8,6 +8,29 @@ HTTPS, y se aloja gratis en GitHub Pages.
 La API **solo tiene endpoints GET**. No expone keys de Binance/Telegram/DB,
 no permite modificar el bot desde la web.
 
+## Secciones (2026-08-11)
+
+Además de lo original (distribución de capital, pares activos, posiciones,
+gráfica de capital, trades, estadísticas por par, IA, Fear&Greed, fondo
+servidor), se agregó:
+
+- **Racha actual + modo**: últimas 5 rachas, récord de wins seguidos, y el
+  modo del bot (NORMAL / RECUPERACIÓN / AGRESIVO — ver `riskManager.js`).
+- **Market Mood**: lectura de Ollama sobre el mercado general, cada 30 min.
+- **4 estrategias en tiempo real**: slots ocupados/totales y capital por
+  slot de ultraScalping/gridScalping/momentumHunter/panicHunter.
+- **Confianza por par**: score incremental (0-100) que define el
+  multiplicador de capital de la próxima entrada en ese par.
+- **Aprendizajes de Ollama**: últimos 3 análisis post-trade.
+- **Gráfica de capital por hora**: los botones 24h/7d ahora usan
+  `?granularity=hourly` en vez de agregación diaria.
+- Polling general bajado de 30s a 5s para reflejar trades/posiciones casi
+  en vivo.
+
+Todo esto consume endpoints nuevos de `src/api/server.js`:
+`/api/capital-activo`, `/api/racha`, `/api/market-mood`, `/api/confidence`,
+`/api/learnings`, y `/api/capital-history?granularity=hourly`.
+
 ## Arquitectura actual
 
 ```

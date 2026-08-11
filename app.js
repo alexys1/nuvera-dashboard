@@ -19,7 +19,9 @@ function resolveApiBase() {
 }
 
 const API_BASE = resolveApiBase();
-const REFRESH_MS = 30000;
+// Bajado de 30s a 5s el 2026-08-11 (pedido explícito: "trades en vivo,
+// polling cada 5 segundos").
+const REFRESH_MS = 5000;
 const TRADES_PAGE_SIZE = 20;
 
 // ---------- Helpers ----------
@@ -206,6 +208,95 @@ function renderCapitalBreakdown(cb, fondoServidorMeta) {
     `;
     grid.appendChild(card);
   }
+}
+
+// ---------- Render: racha + modo (2026-08-11, pedido explícito) ----------
+const MODO_LABELS = { NORMAL: 'NORMAL', RECOVERY: 'RECUPERACIÓN', AGGRESSIVE: 'AGRESIVO' };
+function renderRacha(d) {
+  $('racha-strip').innerHTML = (d.ultimos5 || [])
+    .map((o) => `<span class="racha-dot ${o === 'win' ? 'win' : 'loss'}">${o === 'win' ? '✅' : '❌'}</span>`)
+    .join('');
+  const tipoTxt = d.tipo === 'wins' ? 'ganancias' : d.tipo === 'losses' ? 'pérdidas' : '—';
+  $('racha-texto').textContent = `Racha: ${d.rachaActual} ${tipoTxt} seguidas`;
+  $('racha-record').textContent = `Récord de wins seguidos: ${d.recordWins}`;
+  $('racha-ultima-perdida').textContent = d.ultimaPerdida ? `Última pérdida: ${d.ultimaPerdida}` : 'Sin pérdidas registradas';
+
+  const modo = d.modo || { nombre: 'NORMAL' };
+  const tag = $('modo-tag');
+  tag.textContent = MODO_LABELS[modo.nombre] || modo.nombre;
+  tag.className = `modo-tag modo-${modo.nombre}`;
+  $('modo-razon').textContent = modo.razon
+    ? `${modo.razon}${modo.tradesRestantes ? ` · ${modo.tradesRestantes} trades restantes` : ''}${modo.parSugerido ? ` · par sugerido: ${modo.parSugerido}` : ''}`
+    : '';
+}
+
+// ---------- Render: market mood (2026-08-11, pedido explícito) ----------
+function renderMood(d) {
+  const badge = $('mood-badge');
+  if (d.mood === 'favorable') {
+    badge.textContent = '🟢 FAVORABLE';
+    badge.className = 'mood-badge favorable';
+  } else if (d.mood === 'esperar') {
+    badge.textContent = '🟡 ESPERAR';
+    badge.className = 'mood-badge esperar';
+  } else {
+    badge.textContent = '⚪ NEUTRAL';
+    badge.className = 'mood-badge neutral';
+  }
+  $('mood-razon').textContent = d.razon || d.senalClara || 'Sin análisis todavía.';
+  $('mood-pares').innerHTML = (d.paresMomentum || []).map((p) => `<span class="chip">${p}</span>`).join('');
+  $('mood-meta').textContent = d.actualizado
+    ? `Actualizado hace ${d.actualizadoHaceMin} min · próximo análisis en ${d.proximoAnalisisEnMin} min`
+    : 'Esperando el primer análisis (cron cada 30 min).';
+}
+
+// ---------- Render: 4 estrategias en tiempo real (2026-08-11, pedido explícito) ----------
+const STRATEGY_LABELS = { ultraScalping: '⚡ Ultra Scalping', gridScalping: '🔄 Grid Scalping', momentumHunter: '🚀 Momentum Hunter', panicHunter: '😱 Pánico Hunter' };
+function renderStrategies(list) {
+  $('strategy-list').innerHTML = (list || []).map((s) => {
+    const dots = Array.from({ length: s.slotsTotal }, (_, i) => `<span class="slot-dot ${i < s.slotsOcupados ? 'filled' : ''}"></span>`).join('');
+    return `<div class="strategy-row">
+      <span class="strategy-name">${STRATEGY_LABELS[s.nombre] || s.nombre}</span>
+      <span class="slot-dots">${dots}</span>
+      <span class="strategy-slots">${s.slotsOcupados}/${s.slotsTotal} · $${s.capitalPorSlot}/slot</span>
+    </div>`;
+  }).join('');
+}
+
+// ---------- Render: capital activo (2026-08-11, pedido explícito) ----------
+function renderCapitalActivo(d) {
+  renderStrategies(d.estrategias);
+}
+
+// ---------- Render: confianza por par (2026-08-11, pedido explícito) ----------
+function confColor(v) {
+  if (v > 70) return 'var(--accent)';
+  if (v >= 50) return 'var(--accent-2)';
+  if (v >= 30) return 'var(--warning)';
+  return 'var(--critical)';
+}
+function renderConfidence(rows) {
+  const box = $('confidence-list');
+  if (!rows || rows.length === 0) { box.innerHTML = '<div class="empty-msg">Todavía sin datos.</div>'; return; }
+  box.innerHTML = rows.slice(0, 12).map((r) => `
+    <div class="conf-row">
+      <span class="conf-pair mono">${r.par.replace('/USDT', '')}</span>
+      <span class="conf-bar-bg"><span class="conf-bar-fill" style="width:${r.confianza}%; background:${confColor(r.confianza)}"></span></span>
+      <span class="conf-val mono">${r.confianza}/100 ×${r.multiplicadorCapital}</span>
+    </div>
+  `).join('');
+}
+
+// ---------- Render: aprendizajes de Ollama (2026-08-11, pedido explícito) ----------
+function renderLearnings(rows) {
+  const box = $('learnings-list');
+  if (!rows || rows.length === 0) { box.innerHTML = '<div class="empty-msg">Todavía sin aprendizajes.</div>'; return; }
+  box.innerHTML = rows.map((l) => `
+    <div class="learning">
+      <div class="learning-head"><span>${l.par} · ${l.outcome === 'win' ? '✅ WIN' : '❌ LOSS'}</span><span>${l.fecha}</span></div>
+      <div class="learning-text">📚 ${l.aprendizaje}</div>
+    </div>
+  `).join('');
 }
 
 // ---------- Render: pares activos (cards visuales, sección 4) ----------
@@ -415,11 +506,29 @@ function renderSystemFooter(sys) {
 // ---------- Chart: capital histórico (área, color vs capital inicial, zoom) ----------
 let capitalChart = null;
 let capitalInicialRef = null;
-let currentChartDays = 30;
+let currentChartRange = '30d';
+
+// 2026-08-11 (pedido explícito: "gráfica por hora, no por día") — 24h/7d
+// usan granularidad horaria (GET /api/capital-history?granularity=hourly),
+// 30d/todo se mantienen diarios (mismo endpoint, sin ese parámetro).
+function chartUrlForRange(range) {
+  if (range === '24h') return '/api/capital-history?granularity=hourly&hours=24';
+  if (range === '7d') return '/api/capital-history?granularity=hourly&hours=168';
+  if (range === '30d') return '/api/capital-history?days=30';
+  return '/api/capital-history?days=3650';
+}
+function chartLabelFor(range, fecha) {
+  // fecha viene ISO completo en horario (24h/7d) o 'YYYY-MM-DD' en diario (30d/todo).
+  if (range === '24h' || range === '7d') {
+    const d = new Date(fecha);
+    return `${String(d.getUTCHours()).padStart(2, '0')}h ${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+  return fecha.slice(5);
+}
 
 function renderCapitalChart(history) {
   const ctx = document.getElementById('capital-chart');
-  const labels = history.map((h) => h.fecha.slice(5)); // MM-DD
+  const labels = history.map((h) => chartLabelFor(currentChartRange, h.fecha));
   const values = history.map((h) => h.capital);
   const lastValue = values.length > 0 ? values[values.length - 1] : null;
   const trendUp = capitalInicialRef !== null && lastValue !== null ? lastValue >= capitalInicialRef : true;
@@ -488,21 +597,21 @@ function renderCapitalChart(history) {
   }
 }
 
-async function loadCapitalChart(days) {
-  currentChartDays = days;
+async function loadCapitalChart(range) {
+  currentChartRange = range;
   try {
-    const history = await fetchJson(`/api/capital-history?days=${days}`);
+    const history = await fetchJson(chartUrlForRange(range));
     renderCapitalChart(history);
   } catch (err) {
     console.error('[nuvera-dashboard] Error cargando historial de capital:', err.message);
   }
 }
 
-// Refresca el gráfico con el zoom vigente (currentChartDays) — se llama en
-// cada ciclo de refreshAll, no solo al tocar los botones 7d/30d/Todo.
+// Refresca el gráfico con el zoom vigente (currentChartRange) — se llama en
+// cada ciclo de refreshAll, no solo al tocar los botones 24h/7d/30d/Todo.
 async function refreshCapitalChart() {
   try {
-    const history = await fetchJson(`/api/capital-history?days=${currentChartDays}`);
+    const history = await fetchJson(chartUrlForRange(currentChartRange));
     renderCapitalChart(history);
   } catch (err) {
     console.error('[nuvera-dashboard] Error refrescando historial de capital:', err.message);
@@ -542,7 +651,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -553,12 +662,22 @@ async function refreshAll() {
       fetchJson('/api/system'),
       fetchJson('/api/patterns?limit=1'),
       fetchJson('/api/capital-breakdown'),
+      fetchJson('/api/capital-activo'),
+      fetchJson('/api/racha'),
+      fetchJson('/api/market-mood'),
+      fetchJson('/api/confidence'),
+      fetchJson('/api/learnings?limit=3'),
     ]);
 
     setConnWarning(false);
     renderStatus(status);
     capitalInicialRef = status.capitalInicial;
     renderCapitalBreakdown(capitalBreakdown, status.fondoServidorMeta);
+    renderCapitalActivo(capitalActivo);
+    renderRacha(racha);
+    renderMood(mood);
+    renderConfidence(confidence);
+    renderLearnings(learnings);
     renderPositions(positions);
     renderActivePairs(pairs);
     renderPairsHistory(pairsHistory);
@@ -583,11 +702,11 @@ async function refreshAll() {
 
 // ---------- Listeners de controles ----------
 document.getElementById('chart-zoom-controls').addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-days]');
+  const btn = e.target.closest('button[data-chartrange]');
   if (!btn) return;
   document.querySelectorAll('#chart-zoom-controls .btn-tab').forEach((b) => b.classList.remove('active'));
   btn.classList.add('active');
-  loadCapitalChart(parseInt(btn.dataset.days, 10));
+  loadCapitalChart(btn.dataset.chartrange);
 });
 
 document.querySelectorAll('button[data-range]').forEach((btn) => {

@@ -506,6 +506,36 @@ function renderPerformanceByHour(rows) {
   }
 }
 
+// ---------- Render: mejores/peores pares de HOY (ACCIÓN 5) ----------
+function bwRowHtml(r, good) {
+  const barPct = Math.min(100, Math.max(2, r.winrate));
+  const bloqueadoTag = r.bloqueado
+    ? ` <span class="status-tag blacklist">🔴 ${r.tipoBloqueo === 'permanente' ? 'BLOQUEADO' : 'BLOQUEADO 48h'}</span>`
+    : '';
+  return `
+    <div class="bw-row">
+      <span class="bw-pair">${coinIconHtml(r.par)} ${r.par.split('/')[0]}</span>
+      <div class="bw-track"><div class="bw-fill ${good ? 'good' : 'bad'}" style="width:${barPct}%;"></div></div>
+      <span class="mono ${pnlClass(r.pnl)}">${fmtUsd(r.pnl)}</span>
+      <span class="mono">${r.winrate}% (${r.trades})</span>
+    </div>${bloqueadoTag ? `<div style="margin:-4px 0 6px 96px;">${bloqueadoTag}</div>` : ''}
+  `;
+}
+
+function renderBestWorstPairsToday(data) {
+  const mejores = data.mejores || [];
+  const peores = data.peores || [];
+  $('best-worst-empty').style.display = (mejores.length === 0 && peores.length === 0) ? 'block' : 'none';
+
+  $('best-pairs-today').innerHTML = mejores.length > 0
+    ? mejores.map((r) => bwRowHtml(r, true)).join('')
+    : '<div class="empty-msg">Sin datos todavía.</div>';
+
+  $('worst-pairs-today').innerHTML = peores.length > 0
+    ? peores.map((r) => bwRowHtml(r, false)).join('')
+    : '<div class="empty-msg">Sin datos todavía.</div>';
+}
+
 // ---------- Render: bloqueos de IA hoy (CAMBIO 1, dentro del panel de IA) ----------
 function renderIaBlocksToday(d) {
   const estadoTxt = { funcionando: '✅ funcionando bien', revisar: '⚠️ revisar (bloquea muy poco)', normal: 'normal', sin_datos: 'sin datos hoy' }[d.estado] || d.estado;
@@ -759,7 +789,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday, bestWorstToday] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -779,6 +809,7 @@ async function refreshAll() {
       fetchJson('/api/performance-by-pair'),
       fetchJson('/api/performance-by-hour'),
       fetchJson('/api/ia-blocks-today'),
+      fetchJson('/api/best-worst-pairs-today'),
     ]);
 
     setConnWarning(false);
@@ -802,6 +833,7 @@ async function refreshAll() {
     renderPerformanceByPair(performanceByPair);
     renderPerformanceByHour(performanceByHour);
     renderIaBlocksToday(iaBlocksToday);
+    renderBestWorstPairsToday(bestWorstToday);
 
     checkForNewTrades(trades);
     allTrades = trades;

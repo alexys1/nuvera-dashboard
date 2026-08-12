@@ -194,6 +194,19 @@
   .ia-blocks-summary { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-secondary); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .ia-blocks-summary strong { color: var(--text-primary); }
 
+  .best-worst-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 640px) { .best-worst-grid { grid-template-columns: 1fr; } }
+  .bw-title { font-size: 13px; margin: 0 0 10px; }
+  .bw-title-good { color: var(--accent); }
+  .bw-title-bad { color: var(--critical); }
+  .bw-row { display: grid; grid-template-columns: 90px 1fr 70px 60px; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
+  .bw-row:last-child { border-bottom: none; }
+  .bw-pair { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .bw-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+  .bw-fill { height: 100%; border-radius: 999px; }
+  .bw-fill.good { background: var(--accent); }
+  .bw-fill.bad { background: var(--critical); }
+
   .coin-icon { border-radius: 50%; display: inline-block; vertical-align: middle; flex-shrink: 0; }
   .coin-fallback {
     width: 20px; height: 20px; border-radius: 50%; background: var(--surface-3);
@@ -600,6 +613,22 @@
       </table>
       <div class="empty-msg" id="pairs-history-empty" style="display:none;">Sin datos todavía.</div>
     </div>
+  </section>
+
+  <!-- 6b. Mejores/peores pares de HOY (ACCIÓN 5) -->
+  <section class="panel">
+    <h2><span>🏆 Mejores y peores pares hoy</span></h2>
+    <div class="best-worst-grid">
+      <div>
+        <h3 class="bw-title bw-title-good">🏆 Mejores pares hoy</h3>
+        <div id="best-pairs-today"></div>
+      </div>
+      <div>
+        <h3 class="bw-title bw-title-bad">⚠️ Pares problemáticos</h3>
+        <div id="worst-pairs-today"></div>
+      </div>
+    </div>
+    <div class="empty-msg" id="best-worst-empty" style="display:none;">Sin trades cerrados todavía hoy.</div>
   </section>
 
   <!-- 7b. Rendimiento por par y hora (todas las estrategias, CAMBIO 6) -->

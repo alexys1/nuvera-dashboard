@@ -183,6 +183,16 @@
   .status-tag { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
   .status-tag.active { color: var(--accent); background: var(--accent-dim); }
   .status-tag.blacklist { color: var(--critical); background: var(--critical-dim); }
+  .status-tag.warn { color: var(--warning); background: var(--warning-dim); }
+
+  .perf-hour-row { display: grid; grid-template-columns: 64px 1fr 90px 70px; align-items: center; gap: 10px; padding: 5px 0; font-size: 12px; }
+  .perf-hour-row .hour-label { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .perf-hour-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+  .perf-hour-fill { height: 100%; border-radius: 999px; }
+  .perf-hour-fill.good { background: var(--accent); }
+  .perf-hour-fill.bad { background: var(--critical); }
+  .ia-blocks-summary { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-secondary); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .ia-blocks-summary strong { color: var(--text-primary); }
 
   .coin-icon { border-radius: 50%; display: inline-block; vertical-align: middle; flex-shrink: 0; }
   .coin-fallback {
@@ -592,6 +602,24 @@
     </div>
   </section>
 
+  <!-- 7b. Rendimiento por par y hora (todas las estrategias, CAMBIO 6) -->
+  <section class="panel">
+    <h2>
+      <span>📉 Rendimiento por par y hora (todas las estrategias)</span>
+    </h2>
+    <div class="table-scroll">
+      <table id="tbl-performance-pair">
+        <thead>
+          <tr><th>Par</th><th>Trades</th><th>WR%</th><th>PnL</th><th>Estado</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty-msg" id="performance-pair-empty" style="display:none;">Sin datos todavía.</div>
+    </div>
+    <h3 style="margin:18px 0 8px;font-size:13px;color:var(--text-secondary);">Por hora (UTC)</h3>
+    <div id="performance-hour-bars"></div>
+  </section>
+
   <!-- 8. IA -->
   <section class="panel">
     <h2>Última decisión de IA (Groq)</h2>
@@ -608,6 +636,7 @@
       </div>
     </div>
     <div class="empty-msg" id="ai-empty" style="display:none;">Sin decisiones de IA todavía.</div>
+    <div class="ia-blocks-summary" id="ia-blocks-summary"></div>
   </section>
 
   <!-- 9. Fear & Greed -->

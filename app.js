@@ -460,6 +460,62 @@ function renderBlacklistSummary(list) {
     : '';
 }
 
+// ---------- Render: rendimiento por par y hora (todas las estrategias, CAMBIO 6) ----------
+function performanceStatusTag(estado) {
+  if (estado === 'blacklist') return `<span class="status-tag blacklist">⛔ Blacklist 48h</span>`;
+  if (estado === 'bajo_wr') return `<span class="status-tag warn">⚠️ WR bajo</span>`;
+  return `<span class="status-tag active">✅ Activo</span>`;
+}
+
+function renderPerformanceByPair(rows) {
+  const tbody = document.querySelector('#tbl-performance-pair tbody');
+  tbody.innerHTML = '';
+  $('performance-pair-empty').style.display = rows.length === 0 ? 'block' : 'none';
+  document.getElementById('tbl-performance-pair').style.display = rows.length === 0 ? 'none' : 'table';
+
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="pair-cell mono">${coinIconHtml(r.par)} ${r.par}</td>
+      <td class="mono">${r.trades}</td>
+      <td class="mono">${r.winrate}%</td>
+      <td class="mono ${pnlClass(r.pnl)}">${fmtUsd(r.pnl)}</td>
+      <td>${performanceStatusTag(r.estado)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderPerformanceByHour(rows) {
+  const wrap = $('performance-hour-bars');
+  wrap.innerHTML = '';
+  const sorted = [...rows].sort((a, b) => a.horaUtc - b.horaUtc);
+
+  for (const r of sorted) {
+    const row = document.createElement('div');
+    row.className = 'perf-hour-row';
+    const good = r.winrate >= 50;
+    const evitadaTag = r.estado === 'evitada' ? ' ⛔' : (r.estado === 'bajo_wr' ? ' ⚠️' : '');
+    row.innerHTML = `
+      <span class="hour-label">${String(r.horaUtc).padStart(2, '0')}h UTC</span>
+      <div class="perf-hour-track"><div class="perf-hour-fill ${good ? 'good' : 'bad'}" style="width:${Math.max(2, r.winrate)}%;"></div></div>
+      <span class="mono">${r.winrate}% (${r.trades})</span>
+      <span class="mono ${pnlClass(r.pnl)}">${fmtUsd(r.pnl)}${evitadaTag}</span>
+    `;
+    wrap.appendChild(row);
+  }
+}
+
+// ---------- Render: bloqueos de IA hoy (CAMBIO 1, dentro del panel de IA) ----------
+function renderIaBlocksToday(d) {
+  const estadoTxt = { funcionando: '✅ funcionando bien', revisar: '⚠️ revisar (bloquea muy poco)', normal: 'normal', sin_datos: 'sin datos hoy' }[d.estado] || d.estado;
+  $('ia-blocks-summary').innerHTML = `
+    <span>🛡️ Bloqueados por IA hoy: <strong>${d.bloqueadosHoy}</strong></span>
+    <span>Entradas reales: <strong>${d.entradasHoy}</strong></span>
+    <span>% bloqueado: <strong>${d.pctBloqueado}%</strong> (${estadoTxt})</span>
+  `;
+}
+
 // ---------- Render: IA (sección 8) ----------
 function renderAiDecisions(data) {
   const decisions = data.decisiones || [];
@@ -703,7 +759,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -720,6 +776,9 @@ async function refreshAll() {
       fetchJson('/api/confidence'),
       fetchJson('/api/learnings?limit=3'),
       fetchJson('/api/health'),
+      fetchJson('/api/performance-by-pair'),
+      fetchJson('/api/performance-by-hour'),
+      fetchJson('/api/ia-blocks-today'),
     ]);
 
     setConnWarning(false);
@@ -740,6 +799,9 @@ async function refreshAll() {
     renderSystemFooter(system);
     renderPatternsNote(patterns);
     renderHealth(health);
+    renderPerformanceByPair(performanceByPair);
+    renderPerformanceByHour(performanceByHour);
+    renderIaBlocksToday(iaBlocksToday);
 
     checkForNewTrades(trades);
     allTrades = trades;

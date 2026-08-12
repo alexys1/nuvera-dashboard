@@ -506,6 +506,150 @@ function renderPerformanceByHour(rows) {
   }
 }
 
+// ---------- Render: Diario del bot (estilo Binance Square) ----------
+function showSimpleToast(text) {
+  const stack = $('toast-stack');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = text;
+  stack.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('fade-out');
+    setTimeout(() => el.remove(), 350);
+  }, 3000);
+}
+
+function diaryStatRow(label, value) {
+  return `<div class="ds-row"><span class="ds-label">${label}</span><span class="ds-value">${value}</span></div>`;
+}
+
+let diaryChart = null;
+let diaryChartSeries = null;
+let diaryChartRenderedFor = null; // "fecha|par" ya dibujado, evita re-fetch/redraw cada 5s
+
+async function drawDiaryChart(pair, entryPrice, entryTimeIso, fecha) {
+  const key = `${fecha}|${pair}`;
+  if (diaryChartRenderedFor === key) return;
+  const container = $('diary-chart');
+  if (!pair || typeof LightweightCharts === 'undefined') { container.innerHTML = ''; return; }
+
+  $('diary-chart-label').textContent = `${pair} · 24h`;
+
+  try {
+    const symbol = pair.replace('/', '');
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=24`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const klines = await res.json();
+    const candles = klines.map((k) => ({ time: Math.floor(k[0] / 1000), open: +k[1], high: +k[2], low: +k[3], close: +k[4] }));
+
+    container.innerHTML = '';
+    diaryChart = LightweightCharts.createChart(container, {
+      width: container.clientWidth,
+      height: 220,
+      layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+      timeScale: { timeVisible: true, borderColor: 'rgba(255,255,255,0.08)' },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+      crosshair: { mode: 0 },
+    });
+    diaryChartSeries = diaryChart.addCandlestickSeries({
+      upColor: '#00ff88', downColor: '#f85149', borderVisible: false,
+      wickUpColor: '#00ff88', wickDownColor: '#f85149',
+    });
+    diaryChartSeries.setData(candles);
+
+    if (entryPrice && entryTimeIso) {
+      const entryTimeSec = Math.floor(new Date(entryTimeIso).getTime() / 1000);
+      diaryChartSeries.setMarkers([{
+        time: entryTimeSec, position: 'belowBar', color: '#00ff88', shape: 'arrowUp', text: `Entrada $${entryPrice}`,
+      }]);
+    }
+
+    diaryChart.timeScale().fitContent();
+    diaryChartRenderedFor = key;
+
+    window.addEventListener('resize', () => {
+      if (diaryChart) diaryChart.applyOptions({ width: container.clientWidth });
+    });
+  } catch (err) {
+    console.error('[nuvera-dashboard] Error dibujando gráfica del diario:', err.message);
+    container.innerHTML = '<div class="empty-msg">No se pudo cargar la gráfica.</div>';
+  }
+}
+
+const DIARY_LIKED_KEY = 'nuvera_diary_liked_date';
+
+function renderDiaryToday(data) {
+  if (!data.disponible) {
+    $('diary-today-card').style.display = 'none';
+    $('diary-empty').style.display = 'block';
+    return;
+  }
+  $('diary-empty').style.display = 'none';
+  $('diary-today-card').style.display = 'block';
+
+  const fechaObj = new Date(`${data.fecha}T00:00:00Z`);
+  const fechaFmt = fechaObj.toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  $('diary-date').textContent = `${fechaFmt} | 12:00 UTC`;
+  $('diary-analisis').textContent = data.analisis || '—';
+  $('diary-senales').textContent = data.senalesManana || '—';
+
+  const s = data.stats || {};
+  const best = data.mejorTrade;
+  $('diary-stats').innerHTML = [
+    diaryStatRow('Trades', s.total ?? '—'),
+    diaryStatRow('Winrate', s.winrate !== undefined ? `${s.winrate}%` : '—'),
+    diaryStatRow('PnL', s.pnlTotal !== undefined ? fmtUsd(s.pnlTotal) : '—'),
+    diaryStatRow('Capital', s.capitalHoy !== undefined ? fmtUsd(s.capitalHoy) : '—'),
+    best ? diaryStatRow('Mejor trade', `${best.pair.split('/')[0]} ${fmtUsd(best.pnl)}`) : '',
+    s.worstTrade ? diaryStatRow('Peor trade', `${s.worstTrade.pair.split('/')[0]} ${fmtUsd(s.worstTrade.pnl)}`) : '',
+  ].join('');
+
+  const likes = data.likes || 0;
+  $('diary-likes').textContent = likes;
+  const alreadyLiked = localStorage.getItem(DIARY_LIKED_KEY) === data.fecha;
+  $('diary-like-btn').classList.toggle('liked', alreadyLiked);
+
+  drawDiaryChart(data.parGrafica, best ? best.entryPrice : null, best ? best.entryTime : null, data.fecha);
+
+  $('diary-like-btn').onclick = async () => {
+    if (localStorage.getItem(DIARY_LIKED_KEY) === data.fecha) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/diary/like`, { method: 'POST' });
+      const json = await res.json();
+      if (json.likes !== undefined) {
+        $('diary-likes').textContent = json.likes;
+        localStorage.setItem(DIARY_LIKED_KEY, data.fecha);
+        $('diary-like-btn').classList.add('liked');
+      }
+    } catch (err) { console.error('[nuvera-dashboard] Error al dar like:', err.message); }
+  };
+
+  $('diary-share-btn').onclick = () => {
+    const text = `🤖 NUVERA BOT — Análisis del ${fechaFmt}\n\n${data.analisis}\n\n🎯 Para mañana: ${data.senalesManana}`;
+    navigator.clipboard.writeText(text).then(() => showSimpleToast('📋 Copiado al portapapeles')).catch(() => showSimpleToast('No se pudo copiar'));
+  };
+}
+
+function renderDiaryHistory(rows) {
+  const list = $('diary-history-list');
+  if (rows.length === 0) {
+    list.innerHTML = '<div class="empty-msg">Sin historial todavía.</div>';
+    return;
+  }
+  list.innerHTML = rows.map((r) => {
+    const fechaObj = new Date(`${r.fecha}T00:00:00Z`);
+    const fechaFmt = fechaObj.toLocaleDateString('es', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    const s = r.stats || {};
+    return `
+      <div class="diary-history-item">
+        <div class="dh-date">${fechaFmt} — ${s.total ?? '—'} trades, WR ${s.winrate ?? '—'}%, PnL ${s.pnlTotal !== undefined ? fmtUsd(s.pnlTotal) : '—'}</div>
+        <div class="dh-text">${(r.analisis || '').slice(0, 220)}${(r.analisis || '').length > 220 ? '…' : ''}</div>
+      </div>
+    `;
+  }).join('');
+}
+
 // ---------- Render: mejores/peores pares de HOY (ACCIÓN 5) ----------
 function bwRowHtml(r, good) {
   const barPct = Math.min(100, Math.max(2, r.winrate));
@@ -789,7 +933,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday, bestWorstToday] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday, bestWorstToday, diaryToday, diaryHistory] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -810,6 +954,8 @@ async function refreshAll() {
       fetchJson('/api/performance-by-hour'),
       fetchJson('/api/ia-blocks-today'),
       fetchJson('/api/best-worst-pairs-today'),
+      fetchJson('/api/diary/today'),
+      fetchJson('/api/diary/history?days=7'),
     ]);
 
     setConnWarning(false);
@@ -834,6 +980,8 @@ async function refreshAll() {
     renderPerformanceByHour(performanceByHour);
     renderIaBlocksToday(iaBlocksToday);
     renderBestWorstPairsToday(bestWorstToday);
+    renderDiaryToday(diaryToday);
+    renderDiaryHistory(diaryHistory);
 
     checkForNewTrades(trades);
     allTrades = trades;

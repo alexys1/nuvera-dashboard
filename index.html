@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root {
     --bg: #0d1117;
@@ -206,6 +207,50 @@
   .bw-fill { height: 100%; border-radius: 999px; }
   .bw-fill.good { background: var(--accent); }
   .bw-fill.bad { background: var(--critical); }
+
+  /* ---------- Diario del bot (estilo Binance Square) ---------- */
+  .diary-feed { display: flex; justify-content: center; }
+  .diary-card {
+    width: 100%; max-width: 400px; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 16px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  }
+  .diary-header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; }
+  .diary-avatar {
+    width: 40px; height: 40px; border-radius: 50%; background: var(--accent-dim); display: flex;
+    align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+  }
+  .diary-name { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 5px; }
+  .diary-badge { color: var(--accent); font-size: 12px; }
+  .diary-date { font-size: 11px; color: var(--text-muted); }
+  .diary-chart-wrap { position: relative; background: var(--surface); }
+  .diary-chart-label {
+    position: absolute; top: 8px; left: 12px; z-index: 2; font-size: 11px; font-weight: 700;
+    color: var(--text-secondary); background: rgba(13,17,23,0.7); padding: 2px 8px; border-radius: 999px;
+  }
+  .diary-chart { width: 100%; height: 220px; }
+  .diary-block { padding: 14px 16px; border-top: 1px solid var(--border); }
+  .diary-block-title { font-size: 11px; font-weight: 800; letter-spacing: 0.03em; color: var(--text-secondary); margin-bottom: 8px; }
+  .diary-text { font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-line; }
+  .diary-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; }
+  .diary-stats .ds-row { display: flex; flex-direction: column; gap: 2px; }
+  .diary-stats .ds-label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .diary-stats .ds-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .diary-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .diary-action-btn {
+    background: none; border: none; color: var(--text-secondary); font-size: 12px; font-weight: 600;
+    cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: background 0.15s, color 0.15s;
+  }
+  .diary-action-btn:hover { background: var(--surface-3); color: var(--text-primary); }
+  .diary-action-btn.liked { color: var(--critical); }
+  .diary-action-static { cursor: default; }
+  .diary-action-static:hover { background: none; color: var(--text-secondary); }
+  .diary-history { max-width: 400px; margin: 16px auto 0; }
+  .diary-history summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); padding: 8px 0; }
+  .diary-history-item {
+    padding: 10px 0; border-top: 1px solid var(--border); font-size: 12px;
+  }
+  .diary-history-item .dh-date { font-weight: 700; margin-bottom: 4px; }
+  .diary-history-item .dh-text { color: var(--text-secondary); line-height: 1.5; }
 
   .coin-icon { border-radius: 50%; display: inline-block; vertical-align: middle; flex-shrink: 0; }
   .coin-fallback {
@@ -536,6 +581,49 @@
       <div id="learnings-list"></div>
     </section>
   </div>
+
+  <!-- 3b. Diario del bot (estilo Binance Square, pedido explícito 2026-08-12) -->
+  <section class="panel">
+    <h2><span>📱 Diario del bot</span></h2>
+    <div class="diary-feed">
+      <div class="diary-card" id="diary-today-card" style="display:none;">
+        <div class="diary-header">
+          <div class="diary-avatar">🤖</div>
+          <div>
+            <div class="diary-name">Nuvera Bot <span class="diary-badge">✓</span></div>
+            <div class="diary-date" id="diary-date">—</div>
+          </div>
+        </div>
+        <div class="diary-chart-wrap">
+          <div class="diary-chart-label" id="diary-chart-label">Gráfica</div>
+          <div id="diary-chart" class="diary-chart"></div>
+        </div>
+        <div class="diary-block">
+          <div class="diary-block-title">💭 MI ANÁLISIS DE HOY</div>
+          <div class="diary-text" id="diary-analisis">—</div>
+        </div>
+        <div class="diary-block">
+          <div class="diary-block-title">📊 MIS STATS DE HOY (24H)</div>
+          <div class="diary-stats" id="diary-stats"></div>
+        </div>
+        <div class="diary-block">
+          <div class="diary-block-title">🎯 SEÑALES QUE VEO PARA MAÑANA</div>
+          <div class="diary-text" id="diary-senales">—</div>
+        </div>
+        <div class="diary-actions">
+          <button class="diary-action-btn" id="diary-like-btn">❤️ <span id="diary-likes">0</span></button>
+          <span class="diary-action-btn diary-action-static">💬 0</span>
+          <button class="diary-action-btn" id="diary-share-btn">📤 Compartir</button>
+        </div>
+      </div>
+      <div class="empty-msg" id="diary-empty" style="display:none;">Sin post todavía — se genera todos los días a las 12:00 UTC.</div>
+    </div>
+
+    <details class="diary-history">
+      <summary>Ver historial (últimos 7 días)</summary>
+      <div id="diary-history-list"></div>
+    </details>
+  </section>
 
   <!-- 4. Pares activos (cards visuales) -->
   <section class="panel">

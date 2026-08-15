@@ -2,967 +2,327 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NUVERA BOT — Dashboard</title>
-<meta name="description" content="Dashboard en vivo del bot de trading Nuvera (modo paper)">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Nuvera Bot</title>
+<meta name="description" content="Dashboard en vivo del bot de trading Nuvera">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js" defer></script>
 <style>
   :root {
     --bg: #0d1117;
-    --surface: #161b22;
-    --surface-2: #1c2330;
-    --surface-3: #232b3a;
-    --border: rgba(255,255,255,0.08);
-    --text-primary: #e6edf3;
-    --text-secondary: #8b949e;
-    --text-muted: #6e7681;
-    --accent: #00ff88;
-    --accent-dim: rgba(0,255,136,0.12);
-    --accent-2: #58a6ff;
-    --accent-2-dim: rgba(88,166,255,0.12);
-    --critical: #f85149;
-    --critical-dim: rgba(248,81,73,0.12);
-    --warning: #f0a020;
-    --warning-dim: rgba(240,160,32,0.12);
-    --grid-line: rgba(255,255,255,0.06);
-    --radius: 10px;
+    --card: #161b22;
+    --border: #30363d;
+    --green: #00ff88;
+    --red: #ff4444;
+    --text: #e6edf3;
+    --text-sec: #8b949e;
+    --active-bg: #21262d;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
+
   * { box-sizing: border-box; }
-  html, body {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
     margin: 0;
-    padding: 0;
     background: var(--bg);
-    color: var(--text-primary);
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    overflow-x: hidden;
+    max-width: 100vw;
     -webkit-font-smoothing: antialiased;
   }
-  .mono { font-family: 'Roboto Mono', monospace; }
-  a { color: var(--accent); }
-  button { font-family: inherit; }
 
-  .wrap {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 20px 20px 60px;
-  }
+  a { color: var(--green); }
 
-  /* ---------- Header ---------- */
-  header.top {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 18px 22px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    margin-bottom: 20px;
-  }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .brand .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: blink 2s ease-in-out infinite; }
-  .brand .dot.paused { animation: none; }
-  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-  .brand h1 { font-size: 18px; letter-spacing: 0.06em; margin: 0; font-weight: 800; display: flex; align-items: center; gap: 8px; }
-  .brand h1 .bolt { display: inline-block; animation: pulse-glow 2.4s ease-in-out infinite; filter: drop-shadow(0 0 0 var(--accent)); }
-  @keyframes pulse-glow {
-    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(0,255,136,0.5)); }
-    50% { transform: scale(1.15); filter: drop-shadow(0 0 8px rgba(0,255,136,0.9)); }
-  }
-  .badge {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
-    border: 1px solid var(--border);
-  }
-  .badge.ok { color: var(--accent); border-color: rgba(0,255,136,0.3); background: var(--accent-dim); }
-  .badge.paused { color: var(--critical); border-color: rgba(248,81,73,0.3); background: var(--critical-dim); }
-  .badge.off { color: var(--text-muted); }
-  .badge.mode-paper { color: var(--accent-2); border-color: rgba(88,166,255,0.3); background: var(--accent-2-dim); }
-  .badge.mode-live { color: var(--critical); border-color: rgba(248,81,73,0.4); background: var(--critical-dim); font-weight: 800; }
-
-  .header-metrics { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; }
-  .header-metric .label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
-  .header-metric .value { font-size: 18px; font-weight: 700; }
-  .fng-pill { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
-  .last-update { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-
-  /* ---------- Stat cards ---------- */
-  .stat-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 14px;
-    margin-bottom: 20px;
-  }
-  @media (max-width: 1100px) { .stat-grid { grid-template-columns: repeat(3, 1fr); } }
-  @media (max-width: 640px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 420px) { .stat-grid { grid-template-columns: 1fr; } }
-
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px 18px;
-  }
-  .stat-card .icon { font-size: 18px; opacity: 0.9; }
-  .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
-  .stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .stat-card .value.good { color: var(--accent); }
-  .stat-card .value.bad { color: var(--critical); }
-  .stat-card .sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .mini-bar-track { height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; margin-top: 10px; overflow: hidden; }
-  .mini-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
-
-  /* ---------- Section ---------- */
-  section.panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 18px 20px;
-    margin-bottom: 20px;
-  }
-  section.panel h2 {
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-secondary);
-    margin: 0 0 14px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .panel-controls { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .empty-msg { color: var(--text-muted); font-size: 13px; padding: 18px 0; text-align: center; }
-
-  .btn-tab {
-    background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border);
-    border-radius: 6px; padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .btn-tab:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.2); }
-  .btn-tab.active { background: var(--accent-dim); color: var(--accent); border-color: rgba(0,255,136,0.35); }
-  .btn-icon {
-    background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border);
-    border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
-  }
-  .btn-icon:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.2); }
-  .search-input {
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-primary);
-    border-radius: 6px; padding: 5px 10px; font-size: 12px; width: 150px;
-  }
-  .search-input:focus { outline: none; border-color: rgba(0,255,136,0.35); }
-
-  /* ---------- Tables ---------- */
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  thead th {
-    text-align: left;
-    color: var(--text-muted);
-    font-weight: 600;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 8px 10px;
+  /* ---------- Header fijo ---------- */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
+    padding: calc(10px + var(--safe-top)) 16px 10px;
+  }
+  .header-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .brand {
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.3px;
+    margin-right: auto;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--border);
     white-space: nowrap;
   }
-  tbody td { padding: 10px 10px; border-bottom: 1px solid var(--grid-line); font-variant-numeric: tabular-nums; }
-  tbody tr:last-child td { border-bottom: none; }
-  tbody tr:hover { background: rgba(255,255,255,0.02); }
-  .pair-cell { font-weight: 600; display: flex; align-items: center; gap: 7px; }
-  .pnl-pos { color: var(--accent); }
-  .pnl-neg { color: var(--critical); }
-  .table-scroll { overflow-x: auto; }
-  .outcome-tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.03em; }
-  .outcome-tag.win { color: var(--accent); background: var(--accent-dim); }
-  .outcome-tag.loss { color: var(--critical); background: var(--critical-dim); }
-  .status-tag { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
-  .status-tag.active { color: var(--accent); background: var(--accent-dim); }
-  .status-tag.blacklist { color: var(--critical); background: var(--critical-dim); }
-  .status-tag.warn { color: var(--warning); background: var(--warning-dim); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-sec); flex: none; }
+  .dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.bad { background: var(--red); box-shadow: 0 0 6px var(--red); }
 
-  .perf-hour-row { display: grid; grid-template-columns: 64px 1fr 90px 70px; align-items: center; gap: 10px; padding: 5px 0; font-size: 12px; }
-  .perf-hour-row .hour-label { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-  .perf-hour-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
-  .perf-hour-fill { height: 100%; border-radius: 999px; }
-  .perf-hour-fill.good { background: var(--accent); }
-  .perf-hour-fill.bad { background: var(--critical); }
-  .ia-blocks-summary { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-secondary); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-  .ia-blocks-summary strong { color: var(--text-primary); }
-
-  .best-worst-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-  @media (max-width: 640px) { .best-worst-grid { grid-template-columns: 1fr; } }
-  .bw-title { font-size: 13px; margin: 0 0 10px; }
-  .bw-title-good { color: var(--accent); }
-  .bw-title-bad { color: var(--critical); }
-  .bw-row { display: grid; grid-template-columns: 90px 1fr 70px 60px; align-items: center; gap: 8px; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
-  .bw-row:last-child { border-bottom: none; }
-  .bw-pair { font-weight: 600; display: flex; align-items: center; gap: 6px; }
-  .bw-track { position: relative; height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
-  .bw-fill { height: 100%; border-radius: 999px; }
-  .bw-fill.good { background: var(--accent); }
-  .bw-fill.bad { background: var(--critical); }
-
-  /* ---------- Diario del bot (estilo Binance Square) ---------- */
-  .diary-feed { display: flex; justify-content: center; }
-  .diary-card {
-    width: 100%; max-width: 400px; background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: 16px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
-  }
-  .diary-header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; }
-  .diary-avatar {
-    width: 40px; height: 40px; border-radius: 50%; background: var(--accent-dim); display: flex;
-    align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
-  }
-  .diary-name { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 5px; }
-  .diary-badge { color: var(--accent); font-size: 12px; }
-  .diary-date { font-size: 11px; color: var(--text-muted); }
-  .diary-chart-wrap { position: relative; background: var(--surface); }
-  .diary-chart-label {
-    position: absolute; top: 8px; left: 12px; z-index: 2; font-size: 11px; font-weight: 700;
-    color: var(--text-secondary); background: rgba(13,17,23,0.7); padding: 2px 8px; border-radius: 999px;
-  }
-  .diary-chart { width: 100%; height: 220px; }
-  .diary-block { padding: 14px 16px; border-top: 1px solid var(--border); }
-  .diary-block-title { font-size: 11px; font-weight: 800; letter-spacing: 0.03em; color: var(--text-secondary); margin-bottom: 8px; }
-  .diary-text { font-size: 13px; line-height: 1.6; color: var(--text-primary); white-space: pre-line; }
-  .diary-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; }
-  .diary-stats .ds-row { display: flex; flex-direction: column; gap: 2px; }
-  .diary-stats .ds-label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
-  .diary-stats .ds-value { font-weight: 700; font-variant-numeric: tabular-nums; }
-  .diary-actions { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
-  .diary-action-btn {
-    background: none; border: none; color: var(--text-secondary); font-size: 12px; font-weight: 600;
-    cursor: pointer; padding: 6px 10px; border-radius: 8px; transition: background 0.15s, color 0.15s;
-  }
-  .diary-action-btn:hover { background: var(--surface-3); color: var(--text-primary); }
-  .diary-action-btn.liked { color: var(--critical); }
-  .diary-action-static { cursor: default; }
-  .diary-action-static:hover { background: none; color: var(--text-secondary); }
-  .diary-history { max-width: 400px; margin: 16px auto 0; }
-  .diary-history summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); padding: 8px 0; }
-  .diary-history-item {
-    padding: 10px 0; border-top: 1px solid var(--border); font-size: 12px;
-  }
-  .diary-history-item .dh-date { font-weight: 700; margin-bottom: 4px; }
-  .diary-history-item .dh-text { color: var(--text-secondary); line-height: 1.5; }
-
-  .coin-icon { border-radius: 50%; display: inline-block; vertical-align: middle; flex-shrink: 0; }
-  .coin-fallback {
-    width: 20px; height: 20px; border-radius: 50%; background: var(--surface-3);
-    color: var(--text-secondary); font-size: 8px; font-weight: 800; display: inline-flex;
-    align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid var(--border);
-  }
-
-  .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 12px; font-size: 12px; color: var(--text-secondary); }
-
-  /* ---------- Chart ---------- */
-  .chart-wrap { position: relative; height: 260px; }
-
-  /* ---------- Capital en tiempo real (estilo Binance, pedido explícito 2026-08-15) ---------- */
-  .rt-chart-panel { padding-bottom: 14px; }
-  .rt-chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
-  .rt-chart-title { display: flex; align-items: center; gap: 10px; }
-  .rt-chart-title h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 600; }
-  .rt-chart-live {
-    display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 800;
-    letter-spacing: 0.06em; color: var(--accent); background: var(--accent-dim);
-    border: 1px solid rgba(0,255,136,0.35); border-radius: 20px; padding: 3px 9px;
-  }
-  .rt-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: blink 2s ease-in-out infinite; }
-  .rt-chart-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
-  .rt-stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
-  .rt-stat-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 3px; }
-  .rt-stat-value { display: block; font-size: 15px; font-weight: 700; }
-  .rt-chart-wrap { position: relative; width: 100%; height: 300px; }
-  .rt-chart-tooltip {
-    position: absolute; z-index: 5; pointer-events: none;
-    background: #1c2330; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
-    padding: 6px 10px; font-size: 12px; line-height: 1.5; white-space: nowrap;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
-  }
-  .rt-tt-time { color: var(--text-muted); font-size: 10px; }
-  .rt-tt-value { color: var(--text-primary); font-weight: 700; font-family: 'Roboto Mono', monospace; }
-
-  /* ---------- Pares activos (cards visuales) ---------- */
-  .active-pair-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
-  .active-pair-card {
-    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
-    padding: 14px 16px;
-  }
-  .active-pair-card .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .active-pair-card .pair-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
-  .active-pair-card .fng-tag { font-size: 10px; color: var(--text-muted); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
-  .active-pair-card .price-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-  .active-pair-card .price { font-size: 17px; font-weight: 700; }
-  .active-pair-card .change { font-size: 12px; font-weight: 600; }
-  .active-pair-card .row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-secondary); margin-top: 7px; }
-  .grid-levels { display: flex; gap: 3px; }
-  .grid-levels .lvl { width: 16px; height: 8px; border-radius: 2px; background: rgba(255,255,255,0.1); }
-  .grid-levels .lvl.filled { background: var(--accent); }
-  .stars { letter-spacing: 1px; color: var(--warning); font-size: 11px; }
-  .stars .empty { color: rgba(255,255,255,0.12); }
-
-  /* ---------- Fear & Greed gauge ---------- */
-  .fng-gauge-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
-  .fng-gauge svg { display: block; }
-  .fng-gauge-value { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .fng-gauge-label { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
-  .fng-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); width: 220px; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.03em; }
-
-  /* ---------- AI section ---------- */
-  .ai-card { display: flex; gap: 14px; align-items: flex-start; }
-  .ai-card .ai-emoji { font-size: 26px; line-height: 1; }
-  .ai-card .ai-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
-  .ai-card .ai-text { font-size: 14px; color: var(--text-primary); line-height: 1.5; }
-  .ai-confidence-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-  .ai-confidence-track { flex: 1; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; max-width: 220px; }
-  .ai-confidence-fill { height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
-  .ai-hits { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
-
-  /* ---------- Progress bar (fondo servidor) ---------- */
-  .progress-track {
-    width: 100%; height: 22px; border-radius: 6px; background: rgba(255,255,255,0.06);
-    overflow: hidden; border: 1px solid var(--border); position: relative;
-  }
-  .progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #00c46a, var(--accent));
-    transition: width 0.4s ease;
-  }
-  .progress-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
-
-  /* ---------- Footer ---------- */
-  footer.foot {
-    color: var(--text-muted);
-    font-size: 12px;
-    padding: 18px 20px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+  .header-main {
     display: flex;
+    gap: 28px;
+    align-items: baseline;
     flex-wrap: wrap;
-    gap: 8px 22px;
-    justify-content: center;
   }
-  footer.foot span strong { color: var(--text-secondary); font-weight: 600; }
+  .metric-value { font-size: 28px; font-weight: 700; line-height: 1.1; }
+  .metric-label { font-size: 11px; text-transform: uppercase; color: var(--text-sec); letter-spacing: 0.5px; margin-top: 2px; }
+  .metric-pnl { font-size: 15px; font-weight: 600; }
 
-  #conn-warning {
-    display: none;
-    background: var(--critical-dim);
-    border: 1px solid rgba(248,81,73,0.3);
-    color: var(--critical);
-    border-radius: var(--radius);
-    padding: 12px 16px;
+  .header-sub {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--text-sec);
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+
+  .pnl-pos { color: var(--green); }
+  .pnl-neg { color: var(--red); }
+
+  /* ---------- Layout general ---------- */
+  main { padding: 16px; padding-bottom: calc(24px + var(--safe-bottom)); max-width: 900px; margin: 0 auto; }
+  section { margin-bottom: 20px; }
+
+  /* ---------- Gráfica ---------- */
+  .chart-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+  }
+  .period-selector { display: flex; gap: 6px; margin-bottom: 10px; }
+  .period-btn {
+    flex: 1;
+    min-height: 40px;
+    background: transparent;
+    color: var(--text-sec);
+    border: 1px solid var(--border);
+    border-radius: 8px;
     font-size: 13px;
-    margin-bottom: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .period-btn.active { background: var(--active-bg); color: var(--green); border-color: var(--green); }
+  #chartContainer { width: 100%; height: 200px; }
+  .chart-placeholder {
+    height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-sec);
+    font-size: 13px;
   }
 
-  /* ---------- Toasts (alertas en vivo) ---------- */
-  #toast-stack {
-    position: fixed; top: 16px; right: 16px; z-index: 999;
-    display: flex; flex-direction: column; gap: 8px; max-width: 320px;
+  /* ---------- Cards ---------- */
+  .cards-row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
   }
-  .toast {
-    background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent);
-    border-radius: 8px; padding: 11px 14px; font-size: 13px; color: var(--text-primary);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    animation: toast-in 0.25s ease-out;
+  .card-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-sec);
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
-  .toast.loss { border-left-color: var(--critical); }
-  @keyframes toast-in { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-  .toast.fade-out { animation: toast-out 0.3s ease-in forwards; }
-  @keyframes toast-out { to { transform: translateX(20px); opacity: 0; } }
+  .card-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; padding: 4px 0; }
+  .card-row .label { color: var(--text-sec); }
+  .card-big { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
 
-  /* ---------- Mi Capital (distribución) ---------- */
-  .cb-panel { border-color: rgba(0,255,136,0.18); }
-  .cb-total-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
-  .cb-total-row .cb-total-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
-  .cb-total-row .cb-total-value { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
-  .cb-bars { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
-  .cb-bar-row { display: grid; grid-template-columns: 120px 1fr 90px; align-items: center; gap: 10px; font-size: 13px; }
-  .cb-bar-label { color: var(--text-secondary); white-space: nowrap; }
-  .cb-bar-track { height: 14px; border-radius: 7px; background: rgba(255,255,255,0.06); overflow: hidden; border: 1px solid var(--border); }
-  .cb-bar-fill { height: 100%; border-radius: 7px; transition: width 0.4s ease; }
-  .cb-bar-fill.libre { background: linear-gradient(90deg, #2b9dff, var(--accent-2)); }
-  .cb-bar-fill.invertido { background: linear-gradient(90deg, #d9a72b, var(--warning)); }
-  .cb-bar-fill.fondo { background: linear-gradient(90deg, #00c46a, var(--accent)); }
-  .cb-bar-value { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .cb-fondo-note { font-size: 11px; color: var(--text-muted); margin: -6px 0 16px; }
-  .cb-slots-title { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
-  .cb-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-  .cb-slot-card {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px;
+  /* ---------- Tabs ---------- */
+  .tabs-nav {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 14px;
   }
-  .cb-slot-card.invertido { border-color: rgba(240,160,32,0.35); }
-  .cb-slot-card .cb-slot-pair { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-  .cb-slot-card .cb-slot-detail { text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-  .cb-slot-card .cb-slot-detail strong { color: var(--text-primary); }
-
-  /* ---------- 2026-08-11: Racha/Modo, Market Mood, Estrategias, Confianza, Aprendizajes ---------- */
-  .mini-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-  .mini-grid-3 { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-  @media (max-width: 900px) { .mini-grid-2, .mini-grid-3 { grid-template-columns: 1fr; } }
-
-  /* Racha */
-  .racha-strip { display: flex; gap: 5px; margin-bottom: 10px; }
-  .racha-dot { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; }
-  .racha-dot.win { background: var(--accent-dim); }
-  .racha-dot.loss { background: var(--critical-dim); }
-  .racha-line { font-size: 13px; margin: 5px 0; color: var(--text-primary); }
-  .racha-sub { font-size: 12px; color: var(--text-secondary); }
-  .modo-tag { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 800; margin-top: 10px; letter-spacing: 0.03em; }
-  .modo-NORMAL { background: var(--accent-2-dim); color: var(--accent-2); }
-  .modo-RECOVERY { background: var(--critical-dim); color: var(--critical); }
-  .modo-AGGRESSIVE { background: var(--accent-dim); color: var(--accent); }
-  .modo-razon { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
-
-  /* Market mood */
-  .mood-badge { font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .mood-badge.favorable { color: var(--accent); }
-  .mood-badge.esperar { color: var(--warning); }
-  .mood-badge.neutral { color: var(--text-secondary); }
-  .mood-razon { color: var(--text-secondary); font-size: 13px; line-height: 1.4; }
-  .mood-pares { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
-  .chip { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px; font-size: 11px; }
-  .mood-meta { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
-
-  /* Estrategias */
-  .strategy-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--grid-line); }
-  .strategy-row:last-child { border-bottom: none; }
-  .strategy-name { flex: 1; font-weight: 600; font-size: 13px; }
-  .strategy-slots { font-size: 12px; color: var(--text-secondary); min-width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
-  .slot-dots { display: flex; gap: 4px; }
-  .slot-dot { width: 11px; height: 11px; border-radius: 3px; background: rgba(255,255,255,0.08); border: 1px solid var(--border); }
-  .slot-dot.filled { background: var(--accent); border-color: var(--accent); }
-  .urgente-row { display: flex; align-items: center; gap: 10px; padding: 9px 0 0; color: var(--text-muted); font-size: 12px; }
-
-  /* Confianza */
-  .conf-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12px; }
-  .conf-pair { width: 78px; flex-shrink: 0; font-weight: 600; }
-  .conf-bar-bg { flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.08); overflow: hidden; }
-  .conf-bar-fill { height: 100%; }
-  .conf-val { width: 82px; text-align: right; color: var(--text-secondary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-  .conf-scroll { max-height: 260px; overflow-y: auto; }
-  .ml-features-title { font-size: 12px; color: var(--text-secondary); margin: 16px 0 6px; }
-
-  /* ---------- Salud del Sistema (5 mejoras, pedido explícito 2026-08-16) ---------- */
-  .salud-block { margin-bottom: 18px; }
-  .salud-block:last-child { margin-bottom: 0; }
-  .salud-block-title { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
-  .regime-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .regime-badge { font-size: 15px; font-weight: 700; padding: 5px 12px; border-radius: 20px; background: var(--surface-2); border: 1px solid var(--border); }
-  .regime-badge.alcista { color: var(--accent); border-color: rgba(0,255,136,0.35); background: var(--accent-dim); }
-  .regime-badge.bajista { color: var(--critical); border-color: rgba(248,81,73,0.35); background: var(--critical-dim); }
-  .regime-badge.lateral { color: var(--accent-2); border-color: rgba(88,166,255,0.35); background: var(--accent-2-dim); }
-  .regime-detail { font-size: 12px; color: var(--text-secondary); }
-  .strat-health-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
-  .strat-health-row:last-child { border-bottom: none; }
-  .strat-health-name { width: 130px; flex-shrink: 0; font-weight: 600; }
-  .strat-health-pf { width: 90px; flex-shrink: 0; font-family: 'Roboto Mono', monospace; color: var(--text-secondary); }
-  .strat-health-salud { flex: 1; }
-  .strat-health-capital { color: var(--text-muted); font-size: 12px; text-align: right; }
-  .strat-health-pausada { color: var(--critical); font-size: 11px; font-weight: 700; margin-left: 8px; }
-  .corr-groups-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-  .corr-tag { font-size: 12px; padding: 4px 10px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-secondary); }
-  .corr-tag.activo { color: var(--warning); border-color: rgba(240,160,32,0.35); background: var(--warning-dim); }
-  .corr-tag.disponible { color: var(--accent); border-color: rgba(0,255,136,0.3); background: var(--accent-dim); }
-
-  /* Aprendizajes */
-  .learning { padding: 9px 0; border-bottom: 1px solid var(--grid-line); font-size: 12.5px; }
-  .learning:last-child { border-bottom: none; }
-  .learning-head { display: flex; justify-content: space-between; color: var(--text-muted); font-size: 11px; margin-bottom: 4px; }
-  .learning-text { color: var(--text-primary); line-height: 1.4; }
-
-  /* ---------- Salud del sistema + capital en tiempo real ---------- */
-  .health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 18px; }
-  .health-item {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px;
+  .tab-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-sec);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  .health-item .hi-name { color: var(--text-secondary); }
-  .health-item .hi-value { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .health-item.ok { border-color: rgba(0,255,136,0.3); }
-  .health-item.fail { border-color: rgba(248,81,73,0.4); }
-  .health-item.na { opacity: 0.55; }
-  .health-errors-title { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin: 4px 0 10px; }
-  .health-errors { display: flex; flex-direction: column; gap: 8px; }
-  .health-error-row {
-    background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--warning);
-    border-radius: 8px; padding: 8px 12px; font-size: 12px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  .tab-btn.active { color: var(--text); border-bottom-color: var(--green); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ---------- Listas (posiciones / estrategias) ---------- */
+  .row-list { display: flex; flex-direction: column; gap: 8px; }
+  .pos-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 13px;
   }
-  .health-error-row.unresolved { border-left-color: var(--critical); }
-  .health-error-empty { font-size: 13px; color: var(--text-muted); }
+  .pos-row .pair { font-weight: 700; grid-column: 1 / -1; margin-bottom: 4px; }
+  .pos-row .cell-label { font-size: 10px; text-transform: uppercase; color: var(--text-sec); }
+  .pos-row .cell-value { font-weight: 600; }
+
+  .strat-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+  .strat-header { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+  .strat-line { font-size: 13px; color: var(--text-sec); }
+  .strat-line .hl { color: var(--text); font-weight: 600; }
+
+  .badge { font-size: 12px; margin-left: 4px; }
+
+  .empty-state { color: var(--text-sec); font-size: 13px; text-align: center; padding: 24px 12px; }
+
+  /* ---------- Análisis ---------- */
+  .diary-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+  .diary-body { font-size: 14px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
+  .diary-meta { font-size: 12px; color: var(--text-sec); margin-top: 12px; }
+  .market-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .market-chip { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+  .market-chip .sym { font-size: 11px; color: var(--text-sec); }
+  .market-chip .val { font-size: 14px; font-weight: 700; margin-top: 2px; }
+
+  /* ---------- Sistema ---------- */
+  .sys-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .sys-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .sys-item .val { margin-left: auto; color: var(--text-sec); }
+  .subsection-title { font-size: 12px; text-transform: uppercase; color: var(--text-sec); font-weight: 700; margin: 18px 0 8px; }
+  .err-item { font-size: 12px; padding: 8px; border-left: 2px solid var(--red); background: var(--card); border-radius: 0 8px 8px 0; margin-bottom: 6px; }
+
+  /* ---------- Skeleton ---------- */
+  .skeleton { color: var(--text-sec); }
+
+  /* ---------- Desktop ---------- */
+  @media (min-width: 768px) {
+    main { padding: 24px; }
+    #chartContainer { height: 280px; }
+    .chart-placeholder { height: 280px; }
+    .cards-row { grid-template-columns: repeat(3, 1fr); }
+    .pos-row { grid-template-columns: 1.5fr 1fr 1fr 1fr; align-items: center; }
+    .pos-row .pair { grid-column: auto; margin-bottom: 0; }
+    .metric-value { font-size: 32px; }
+    .tab-btn { font-size: 14px; padding: 0 14px; flex: 1; }
+  }
 </style>
 </head>
 <body>
-<div id="toast-stack"></div>
-<div class="wrap">
 
-  <div id="conn-warning">⚠️ No se pudo conectar con la API del bot. Revisá <code>API_BASE</code> en <code>app.js</code>/consola, o que el servidor esté corriendo.</div>
-
-  <!-- 1. Header -->
-  <header class="top">
-    <div class="brand">
-      <span class="dot" id="status-dot"></span>
-      <h1><span class="bolt">⚡</span> NUVERA BOT</h1>
-      <span class="badge off" id="status-badge">cargando…</span>
-      <span class="badge off" id="mode-badge" style="display:none;"></span>
+<header class="header" id="header">
+  <div class="header-top">
+    <span class="brand">⚡ NUVERA BOT</span>
+    <span class="pill" id="statusPill"><span class="dot" id="statusDot"></span><span id="statusText">—</span></span>
+    <span class="pill" id="modePill">—</span>
+  </div>
+  <div class="header-main">
+    <div>
+      <div class="metric-value" id="capitalValue">—</div>
+      <div class="metric-label">Capital</div>
     </div>
-    <div class="header-metrics">
-      <div class="header-metric">
-        <div class="label">Capital</div>
-        <div class="value mono" id="hdr-capital">—</div>
-      </div>
-      <div class="header-metric">
-        <div class="label">Variación hoy</div>
-        <div class="value mono" id="hdr-var">—</div>
-      </div>
-      <div class="fng-pill">
-        <span>Fear &amp; Greed:</span>
-        <strong id="hdr-fng" class="mono">—</strong>
-      </div>
-      <div class="last-update" id="last-update">actualizando…</div>
-    </div>
-  </header>
-
-  <!-- 0a. Capital en tiempo real, estilo Binance (pedido explícito 2026-08-15) -->
-  <section class="panel rt-chart-panel">
-    <div class="rt-chart-head">
-      <div class="rt-chart-title">
-        <h2>📈 Capital en tiempo real</h2>
-        <span class="rt-chart-live"><span class="rt-live-dot"></span>EN VIVO</span>
-      </div>
-      <div class="panel-controls" id="rt-chart-periods">
-        <button class="btn-tab" data-rtperiod="1h">1H</button>
-        <button class="btn-tab" data-rtperiod="6h">6H</button>
-        <button class="btn-tab active" data-rtperiod="24h">24H</button>
-        <button class="btn-tab" data-rtperiod="7d">7D</button>
-        <button class="btn-tab" data-rtperiod="todo">Todo</button>
-      </div>
-    </div>
-    <div class="rt-chart-stats">
-      <div class="rt-stat">
-        <span class="rt-stat-label">Capital actual</span>
-        <span class="rt-stat-value mono" id="rt-stat-actual">—</span>
-      </div>
-      <div class="rt-stat">
-        <span class="rt-stat-label">Máximo del período</span>
-        <span class="rt-stat-value mono" id="rt-stat-max">—</span>
-      </div>
-      <div class="rt-stat">
-        <span class="rt-stat-label">Mínimo del período</span>
-        <span class="rt-stat-value mono" id="rt-stat-min">—</span>
-      </div>
-      <div class="rt-stat">
-        <span class="rt-stat-label">Variación</span>
-        <span class="rt-stat-value mono" id="rt-stat-var">—</span>
-      </div>
-    </div>
-    <div id="rt-capital-chart" class="rt-chart-wrap"></div>
-    <div class="empty-msg" id="rt-chart-empty" style="display:none;">Sin datos de capital todavía en este período.</div>
-  </section>
-
-  <!-- 0. Mi Capital (distribución) -->
-  <section class="panel cb-panel">
-    <h2>💼 Distribución del capital</h2>
-    <div class="cb-total-row">
-      <span class="cb-total-label">Capital Total</span>
-      <span class="cb-total-value mono" id="cb-total">—</span>
-    </div>
-    <div class="cb-bars">
-      <div class="cb-bar-row">
-        <span class="cb-bar-label">💵 Libre</span>
-        <span class="cb-bar-track"><span class="cb-bar-fill libre" id="cb-bar-libre" style="width:0%"></span></span>
-        <span class="cb-bar-value mono" id="cb-libre">—</span>
-      </div>
-      <div class="cb-bar-row">
-        <span class="cb-bar-label">📊 En trades</span>
-        <span class="cb-bar-track"><span class="cb-bar-fill invertido" id="cb-bar-invertido" style="width:0%"></span></span>
-        <span class="cb-bar-value mono" id="cb-invertido">—</span>
-      </div>
-      <div class="cb-bar-row">
-        <span class="cb-bar-label">🏦 Fondo srv</span>
-        <span class="cb-bar-track"><span class="cb-bar-fill fondo" id="cb-bar-fondo" style="width:0%"></span></span>
-        <span class="cb-bar-value mono" id="cb-fondo">—</span>
-      </div>
-    </div>
-    <div class="cb-fondo-note">El fondo servidor es un pozo aparte (se acumula de las ganancias) — no se resta del capital operativo de arriba.</div>
-    <div class="cb-slots-title">Invertido ahora</div>
-    <div class="cb-slots" id="cb-slots"></div>
-  </section>
-
-  <!-- 2. Cards principales (5) -->
-  <div class="stat-grid">
-    <div class="card stat-card">
-      <div class="icon">💰</div>
-      <div class="label">Capital Total</div>
-      <div class="value mono" id="stat-capital">—</div>
-      <div class="sub mono" id="stat-capital-sub">—</div>
-    </div>
-    <div class="card stat-card">
-      <div class="icon">📈</div>
-      <div class="label">Ganancia Hoy</div>
-      <div class="value mono" id="stat-pnl-hoy">—</div>
-    </div>
-    <div class="card stat-card">
-      <div class="icon">🎯</div>
-      <div class="label">Winrate Hoy</div>
-      <div class="value mono" id="stat-winrate">—</div>
-      <div class="mini-bar-track"><div class="mini-bar-fill" id="stat-winrate-bar" style="width:0%; background: var(--accent);"></div></div>
-    </div>
-    <div class="card stat-card">
-      <div class="icon">🏦</div>
-      <div class="label">Fondo Servidor</div>
-      <div class="value mono" id="stat-fondo">—</div>
-    </div>
-    <div class="card stat-card">
-      <div class="icon">⚡</div>
-      <div class="label">Trades Hoy</div>
-      <div class="value mono" id="stat-trades-hoy">—</div>
-      <div class="sub mono" id="stat-trades-hoy-sub">—</div>
+    <div>
+      <div class="metric-value metric-pnl" id="pnlValue">—</div>
+      <div class="metric-label">Ganancia hoy</div>
     </div>
   </div>
-
-  <!-- Racha/Modo + Market Mood (2026-08-11, pedido explícito) -->
-  <div class="mini-grid-2">
-    <section class="panel">
-      <h2>🔥 Racha actual</h2>
-      <div class="racha-strip" id="racha-strip"></div>
-      <div class="racha-line" id="racha-texto">—</div>
-      <div class="racha-sub" id="racha-record">—</div>
-      <div class="racha-sub" id="racha-ultima-perdida">—</div>
-      <span class="modo-tag modo-NORMAL" id="modo-tag">NORMAL</span>
-      <div class="modo-razon" id="modo-razon"></div>
-    </section>
-    <section class="panel">
-      <h2>🧠 Market Mood (Ollama)</h2>
-      <div class="mood-badge neutral" id="mood-badge">⚪ Sin análisis</div>
-      <div class="mood-razon" id="mood-razon">—</div>
-      <div class="mood-pares" id="mood-pares"></div>
-      <div class="mood-meta" id="mood-meta"></div>
-    </section>
+  <div class="header-sub">
+    <span id="fearGreedText">Fear &amp; Greed: —</span>
+    <span id="lastUpdateText">Última act: —</span>
   </div>
+</header>
 
-  <!-- Estrategias en tiempo real + Confianza por par + Aprendizajes (2026-08-11, pedido explícito) -->
-  <div class="mini-grid-3">
-    <section class="panel">
-      <h2>⚙️ 4 estrategias en tiempo real</h2>
-      <div id="strategy-list"></div>
-      <div class="urgente-row">⚡ urgente — escaneando cada 30s</div>
-    </section>
-    <section class="panel">
-      <h2>📊 Confianza por par</h2>
-      <div class="conf-scroll" id="confidence-list"></div>
-    </section>
-    <section class="panel">
-      <h2>📚 Aprendizajes de Ollama</h2>
-      <div id="learnings-list"></div>
-    </section>
-  </div>
+<main>
 
-  <!-- Modelo ML propio, XGBoost entrenado automáticamente (pedido explícito 2026-08-15) -->
-  <section class="panel">
-    <h2>🤖 Modelo ML (XGBoost)</h2>
-    <div id="ml-model-content">
-      <div class="rt-chart-stats" id="ml-model-stats">
-        <div class="rt-stat">
-          <span class="rt-stat-label">Accuracy</span>
-          <span class="rt-stat-value mono" id="ml-accuracy">—</span>
-        </div>
-        <div class="rt-stat">
-          <span class="rt-stat-label">Trades analizados</span>
-          <span class="rt-stat-value mono" id="ml-trades">—</span>
-        </div>
-        <div class="rt-stat">
-          <span class="rt-stat-label">Último entrenamiento</span>
-          <span class="rt-stat-value mono" id="ml-trained-at">—</span>
-        </div>
-      </div>
-      <div class="ml-features-title">Factores que más pesan en la predicción</div>
-      <div id="ml-features-list"></div>
+  <section class="chart-card">
+    <div class="period-selector" id="periodSelector">
+      <button class="period-btn" data-period="1h">1H</button>
+      <button class="period-btn" data-period="6h">6H</button>
+      <button class="period-btn active" data-period="24h">24H</button>
+      <button class="period-btn" data-period="7d">7D</button>
     </div>
-    <div class="empty-msg" id="ml-model-empty" style="display:none;">Todavía no hay un modelo XGBoost activo (se entrena solo cada lunes 03:00 UTC o al juntar 200 trades nuevos).</div>
+    <div id="chartPlaceholder" class="chart-placeholder">Cargando gráfica…</div>
+    <div id="chartContainer" style="display:none;"></div>
   </section>
 
-  <!-- 5 mejoras de autosostenibilidad: Salud del Sistema (pedido explícito 2026-08-16) -->
-  <section class="panel">
-    <h2>🌡️ Salud del Sistema</h2>
-
-    <div class="salud-block">
-      <div class="salud-block-title">Régimen de mercado</div>
-      <div class="regime-row">
-        <span class="regime-badge" id="regime-badge">— —</span>
-        <span class="regime-detail" id="regime-detail">—</span>
-      </div>
+  <section class="cards-row">
+    <div class="card">
+      <div class="card-title">📈 Hoy</div>
+      <div class="card-row"><span class="label">PnL</span><span class="cell-value" id="cardHoyPnl">—</span></div>
+      <div class="card-row"><span class="label">Trades</span><span id="cardHoyTrades">—</span></div>
+      <div class="card-row"><span class="label">WR / PF</span><span id="cardHoyWrPf">—</span></div>
     </div>
-
-    <div class="salud-block">
-      <div class="salud-block-title">📊 Salud de estrategias</div>
-      <div id="strategy-health-list"></div>
+    <div class="card">
+      <div class="card-title">💰 Capital</div>
+      <div class="card-big" id="cardCapitalTotal">—</div>
+      <div class="card-row"><span class="label">En trades</span><span id="cardCapitalEnTrades">—</span></div>
+      <div class="card-row"><span class="label">Libre</span><span id="cardCapitalLibre">—</span></div>
     </div>
-
-    <div class="salud-block">
-      <div class="salud-block-title">🔗 Anti-correlación</div>
-      <div id="correlation-content"></div>
-    </div>
-
-    <div class="salud-block">
-      <div class="salud-block-title">💰 Próxima reinversión</div>
-      <div class="progress-track">
-        <div class="progress-fill" id="reinvestment-progress" style="width:0%"></div>
-      </div>
-      <div class="progress-meta">
-        <span id="reinvestment-detalle">—</span>
-      </div>
+    <div class="card">
+      <div class="card-title">🧠 Inteligencia</div>
+      <div class="card-row"><span class="label">Ollama</span><span id="cardIaOllama">—</span></div>
+      <div class="card-row"><span class="label">XGBoost</span><span id="cardIaXgb">—</span></div>
+      <div class="card-row"><span class="label">Aprend. hoy</span><span id="cardIaLearnings">—</span></div>
     </div>
   </section>
 
-  <!-- 3b. Diario del bot (estilo Binance Square, pedido explícito 2026-08-12) -->
-  <section class="panel">
-    <h2><span>📱 Diario del bot</span></h2>
-    <div class="diary-feed">
-      <div class="diary-card" id="diary-today-card" style="display:none;">
-        <div class="diary-header">
-          <div class="diary-avatar">🤖</div>
-          <div>
-            <div class="diary-name">Nuvera Bot <span class="diary-badge">✓</span></div>
-            <div class="diary-date" id="diary-date">—</div>
-          </div>
-        </div>
-        <div class="diary-chart-wrap">
-          <div class="diary-chart-label" id="diary-chart-label">Gráfica</div>
-          <div id="diary-chart" class="diary-chart"></div>
-        </div>
-        <div class="diary-block">
-          <div class="diary-block-title">💭 MI ANÁLISIS DE HOY</div>
-          <div class="diary-text" id="diary-analisis">—</div>
-        </div>
-        <div class="diary-block">
-          <div class="diary-block-title">📊 MIS STATS DE HOY (24H)</div>
-          <div class="diary-stats" id="diary-stats"></div>
-        </div>
-        <div class="diary-block">
-          <div class="diary-block-title">🎯 SEÑALES QUE VEO PARA MAÑANA</div>
-          <div class="diary-text" id="diary-senales">—</div>
-        </div>
-        <div class="diary-actions">
-          <button class="diary-action-btn" id="diary-like-btn">❤️ <span id="diary-likes">0</span></button>
-          <span class="diary-action-btn diary-action-static">💬 0</span>
-          <button class="diary-action-btn" id="diary-share-btn">📤 Compartir</button>
-        </div>
-      </div>
-      <div class="empty-msg" id="diary-empty" style="display:none;">Sin post todavía — se genera todos los días a las 12:00 UTC.</div>
+  <section class="tabs-section">
+    <div class="tabs-nav" role="tablist">
+      <button class="tab-btn active" data-tab="posiciones" role="tab">Posiciones</button>
+      <button class="tab-btn" data-tab="estrategias" role="tab">Estrategias</button>
+      <button class="tab-btn" data-tab="analisis" role="tab">Análisis</button>
+      <button class="tab-btn" data-tab="sistema" role="tab">Sistema</button>
     </div>
 
-    <details class="diary-history">
-      <summary>Ver historial (últimos 7 días)</summary>
-      <div id="diary-history-list"></div>
-    </details>
-  </section>
+    <div class="tab-panel active" id="tab-posiciones">
+      <div class="row-list" id="posicionesList"><div class="empty-state skeleton">Cargando…</div></div>
+      <div class="empty-state" id="posicionesVerMas" style="display:none;"></div>
+    </div>
 
-  <!-- 4. Pares activos (cards visuales) -->
-  <section class="panel">
-    <h2>Pares activos</h2>
-    <div class="active-pair-grid" id="active-pair-grid"></div>
-    <div class="empty-msg" id="active-pairs-empty" style="display:none;">Sin pares activos todavía.</div>
-  </section>
+    <div class="tab-panel" id="tab-estrategias">
+      <div id="estrategiasList"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
 
-  <!-- Posiciones abiertas -->
-  <section class="panel">
-    <h2>Posiciones abiertas</h2>
-    <div class="table-scroll">
-      <table id="tbl-positions">
-        <thead>
-          <tr><th>Par</th><th>Nivel</th><th>Entrada</th><th>Actual</th><th>PnL $</th><th>PnL %</th><th>Tiempo</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <div class="empty-msg" id="positions-empty" style="display:none;">Sin posiciones abiertas.</div>
+    <div class="tab-panel" id="tab-analisis">
+      <div id="analisisContent"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+
+    <div class="tab-panel" id="tab-sistema">
+      <div id="sistemaContent"><div class="empty-state skeleton">Cargando…</div></div>
     </div>
   </section>
 
-  <!-- 5. Gráfica de capital -->
-  <section class="panel">
-    <h2>
-      <span>Capital</span>
-      <div class="panel-controls" id="chart-zoom-controls">
-        <button class="btn-tab" data-chartrange="24h">24h</button>
-        <button class="btn-tab" data-chartrange="7d">7d</button>
-        <button class="btn-tab active" data-chartrange="30d">30d</button>
-        <button class="btn-tab" data-chartrange="todo">Todo</button>
-      </div>
-    </h2>
-    <div class="chart-wrap">
-      <canvas id="capital-chart"></canvas>
-    </div>
-  </section>
-
-  <!-- 6. Tabla de trades -->
-  <section class="panel">
-    <h2>
-      <span>Trades</span>
-      <div class="panel-controls">
-        <input type="text" class="search-input" id="trades-search" placeholder="Buscar por par…">
-        <button class="btn-tab active" data-range="all">Todo</button>
-        <button class="btn-tab" data-range="today">Hoy</button>
-        <button class="btn-tab" data-range="week">Esta semana</button>
-        <button class="btn-icon" id="btn-export-csv">⬇ CSV</button>
-      </div>
-    </h2>
-    <div class="table-scroll">
-      <table id="tbl-trades">
-        <thead>
-          <tr><th>Par</th><th>Tipo</th><th>Entrada</th><th>Salida</th><th>PnL</th><th>Duración</th><th>Hora</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <div class="empty-msg" id="trades-empty" style="display:none;">Sin trades todavía.</div>
-    </div>
-    <div class="pagination" id="trades-pagination"></div>
-  </section>
-
-  <!-- 7. Estadísticas por par (histórico) -->
-  <section class="panel">
-    <h2>
-      <span>Estadísticas por par (histórico)</span>
-      <span class="panel-controls" id="blacklist-summary"></span>
-    </h2>
-    <div class="table-scroll">
-      <table id="tbl-pairs-history">
-        <thead>
-          <tr><th>Par</th><th>Trades</th><th>WR%</th><th>PnL</th><th>Mejor hora</th><th>Estado</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <div class="empty-msg" id="pairs-history-empty" style="display:none;">Sin datos todavía.</div>
-    </div>
-  </section>
-
-  <!-- 6b. Mejores/peores pares de HOY (ACCIÓN 5) -->
-  <section class="panel">
-    <h2><span>🏆 Mejores y peores pares hoy</span></h2>
-    <div class="best-worst-grid">
-      <div>
-        <h3 class="bw-title bw-title-good">🏆 Mejores pares hoy</h3>
-        <div id="best-pairs-today"></div>
-      </div>
-      <div>
-        <h3 class="bw-title bw-title-bad">⚠️ Pares problemáticos</h3>
-        <div id="worst-pairs-today"></div>
-      </div>
-    </div>
-    <div class="empty-msg" id="best-worst-empty" style="display:none;">Sin trades cerrados todavía hoy.</div>
-  </section>
-
-  <!-- 7b. Rendimiento por par y hora (todas las estrategias, CAMBIO 6) -->
-  <section class="panel">
-    <h2>
-      <span>📉 Rendimiento por par y hora (todas las estrategias)</span>
-    </h2>
-    <div class="table-scroll">
-      <table id="tbl-performance-pair">
-        <thead>
-          <tr><th>Par</th><th>Trades</th><th>WR%</th><th>PnL</th><th>Estado</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <div class="empty-msg" id="performance-pair-empty" style="display:none;">Sin datos todavía.</div>
-    </div>
-    <h3 style="margin:18px 0 8px;font-size:13px;color:var(--text-secondary);">Por hora (UTC)</h3>
-    <div id="performance-hour-bars"></div>
-  </section>
-
-  <!-- 8. IA -->
-  <section class="panel">
-    <h2>Última decisión de IA (Groq)</h2>
-    <div class="ai-card" id="ai-card">
-      <div class="ai-emoji">🤖</div>
-      <div style="flex:1;">
-        <div class="ai-meta" id="ai-meta">cargando…</div>
-        <div class="ai-text" id="ai-text">—</div>
-        <div class="ai-confidence-row">
-          <span class="ai-hits" id="ai-confidence-label">Confianza: —</span>
-          <div class="ai-confidence-track"><div class="ai-confidence-fill" id="ai-confidence-fill" style="width:0%;"></div></div>
-          <span class="ai-hits" id="ai-hits">Acertó: —</span>
-        </div>
-      </div>
-    </div>
-    <div class="empty-msg" id="ai-empty" style="display:none;">Sin decisiones de IA todavía.</div>
-    <div class="ia-blocks-summary" id="ia-blocks-summary"></div>
-  </section>
-
-  <!-- 9. Fear & Greed -->
-  <section class="panel">
-    <h2>Fear &amp; Greed Index</h2>
-    <div class="fng-gauge-wrap">
-      <div class="fng-gauge">
-        <svg width="220" height="120" viewBox="0 0 220 120">
-          <defs>
-            <linearGradient id="fng-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#f85149"/>
-              <stop offset="25%" stop-color="#f0a020"/>
-              <stop offset="50%" stop-color="#e3e34a"/>
-              <stop offset="75%" stop-color="#7ee787"/>
-              <stop offset="100%" stop-color="#00ff88"/>
-            </linearGradient>
-          </defs>
-          <path d="M 15 110 A 95 95 0 0 1 205 110" fill="none" stroke="url(#fng-grad)" stroke-width="16" stroke-linecap="round"/>
-          <line id="fng-needle" x1="110" y1="110" x2="110" y2="30" stroke="#e6edf3" stroke-width="3" stroke-linecap="round" transform="rotate(-90 110 110)"/>
-          <circle cx="110" cy="110" r="6" fill="#e6edf3"/>
-        </svg>
-        <div class="fng-scale"><span>Miedo extremo</span><span>Codicia extrema</span></div>
-      </div>
-      <div>
-        <div class="fng-gauge-value mono" id="fng-value">—</div>
-        <div class="fng-gauge-label" id="fng-label">cargando…</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 10. Fondo servidor -->
-  <section class="panel">
-    <h2>🏦 Fondo Servidor</h2>
-    <div class="progress-track">
-      <div class="progress-fill" id="fondo-progress" style="width:0%"></div>
-    </div>
-    <div class="progress-meta">
-      <span id="fondo-detalle">$0.00 / $0.00 (0%)</span>
-      <span id="fondo-eta">calculando…</span>
-    </div>
-  </section>
-
-  <!-- 13. Salud del sistema -->
-  <section class="panel" id="health-panel">
-    <h2>🏥 Salud del sistema</h2>
-    <div class="health-grid" id="health-grid"></div>
-    <div class="health-errors-title">⚠️ Errores recientes (últimas 24h)</div>
-    <div id="health-errors" class="health-errors"></div>
-  </section>
-
-  <!-- 14. Capital en tiempo real -->
-  <section class="panel">
-    <h2>📊 Capital en tiempo real</h2>
-    <div class="progress-track">
-      <div class="progress-fill" id="capital-activo-progress" style="width:0%"></div>
-    </div>
-    <div class="progress-meta">
-      <span id="capital-activo-detalle">— / — (—%)</span>
-      <span>Objetivo: &gt;90% siempre trabajando</span>
-    </div>
-  </section>
-
-  <!-- 12. Footer -->
-  <footer class="foot" id="system-footer">
-    <span>Nuvera Trading Bot · modo paper · datos de solo lectura · se actualiza cada 30s</span>
-  </footer>
-</div>
+</main>
 
 <script src="app.js"></script>
 </body>

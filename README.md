@@ -8,28 +8,41 @@ HTTPS, y se aloja gratis en GitHub Pages.
 La API **solo tiene endpoints GET**. No expone keys de Binance/Telegram/DB,
 no permite modificar el bot desde la web.
 
-## Secciones (2026-08-11)
+## Secciones (2026-08-16, rediseño completo)
 
-Además de lo original (distribución de capital, pares activos, posiciones,
-gráfica de capital, trades, estadísticas por par, IA, Fear&Greed, fondo
-servidor), se agregó:
+Rediseño de arriba a abajo enfocado en rendimiento móvil (carga lenta, datos
+duplicados, gráfica lenta y bugs al refrescar en celular eran los problemas
+del diseño anterior). 4 secciones:
 
-- **Racha actual + modo**: últimas 5 rachas, récord de wins seguidos, y el
-  modo del bot (NORMAL / RECUPERACIÓN / AGRESIVO — ver `riskManager.js`).
-- **Market Mood**: lectura de Ollama sobre el mercado general, cada 30 min.
-- **4 estrategias en tiempo real**: slots ocupados/totales y capital por
-  slot de ultraScalping/gridScalping/momentumHunter/panicHunter.
-- **Confianza por par**: score incremental (0-100) que define el
-  multiplicador de capital de la próxima entrada en ese par.
-- **Aprendizajes de Ollama**: últimos 3 análisis post-trade.
-- **Gráfica de capital por hora**: los botones 24h/7d ahora usan
-  `?granularity=hourly` en vez de agregación diaria.
-- Polling general bajado de 30s a 5s para reflejar trades/posiciones casi
-  en vivo.
+1. **Header fijo** (capital, PnL de hoy, Fear&Greed, estado/modo) — se pinta
+   en menos de 1 segundo, antes que cualquier otra cosa.
+2. **Gráfica de capital** (Lightweight Charts) — carga 500ms DESPUÉS del
+   header/cards (lazy), período default 24H (antes era 1H), máximo 200
+   puntos en pantalla (se promedia si la API devuelve más), sin marcadores
+   de trades individuales.
+3. **3 cards**: HOY (PnL/trades/WR/PF), CAPITAL (total/en trades/libre) e
+   INTELIGENCIA (Ollama en RAM/XGBoost/aprendizajes de hoy) — las 3 salen de
+   un solo request a `/api/dashboard-summary`.
+4. **4 tabs** (Posiciones / Estrategias / Análisis / Sistema) — cambio de tab
+   instantáneo (sin petición), cada tab carga sus datos una sola vez la
+   primera vez que se abre y después se cachea.
 
-Todo esto consume endpoints nuevos de `src/api/server.js`:
-`/api/capital-activo`, `/api/racha`, `/api/market-mood`, `/api/confidence`,
-`/api/learnings`, y `/api/capital-history?granularity=hourly`.
+**Caché por tipo de dato** (evita pedir de nuevo antes de que venza): capital
+10s, posiciones 30s, estrategias 60s, análisis diario 30min, sistema 60s.
+Polling de fondo: header/cards cada 15s, tab activa cada 60s, gráfica cada
+60s — se pausa por completo cuando la pestaña del navegador está en segundo
+plano (`visibilitychange`) para no acumular fetches atrasados al volver
+(causa típica de "se bugea al refrescar" en móvil).
+
+Se eliminaron del inicio (siguen existiendo, pero movidas a una tab o
+directamente retiradas por ser redundantes): distribución de capital
+separada, racha aparte, Market Mood aparte, decisiones autónomas aparte,
+tabla de trades históricos, cooldowns aparte, y los botones de like/compartir
+del diario (ahora solo en la tab Análisis).
+
+Endpoints nuevos en `src/api/server.js`: `/api/dashboard-summary` (header +
+3 cards en un solo request) y `/api/strategies-today` (tab Estrategias, PF
+real de hoy por estrategia incluyendo capitalDeployer).
 
 ## Arquitectura actual
 

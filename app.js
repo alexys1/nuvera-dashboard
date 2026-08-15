@@ -34,6 +34,7 @@ const pnlClass = (n) => (n === null || n === undefined ? '' : (n >= 0 ? 'pnl-pos
 const CACHE_TTL_MS = {
   '/api/dashboard-summary': 10_000,
   '/api/positions': 30_000,
+  '/api/trades-history': 30_000,
   '/api/strategies-today': 60_000,
   '/api/diary/today': 30 * 60_000,
   '/api/health': 60_000,
@@ -46,7 +47,12 @@ const CACHE_TTL_MS = {
 const cache = new Map(); // path -> { data, fetchedAt }
 
 async function fetchJson(path, { force = false } = {}) {
-  const ttl = CACHE_TTL_MS[path] ?? 30_000;
+  // /api/trades-history?filter=wins&page=2 etc: el TTL se busca por la parte
+  // antes del '?' (una sola entrada en CACHE_TTL_MS para todas las
+  // combinaciones de filtro/página), pero cada combinación se cachea aparte
+  // (la query string completa es la key del Map) — cambiar de filtro o de
+  // página siempre pide datos frescos la primera vez, no reusa el filtro anterior.
+  const ttl = CACHE_TTL_MS[path.split('?')[0]] ?? 30_000;
   const cached = cache.get(path);
   if (!force && cached && Date.now() - cached.fetchedAt < ttl) return cached.data;
 
@@ -76,6 +82,17 @@ function renderSummary(s) {
     ? `Fear & Greed: ${s.fearGreed} ${s.fearGreedLabel || ''}`
     : 'Fear & Greed: —';
 
+  // Racha actual (header): solo se muestra si hay 2+ seguidos — una racha de
+  // 1 no dice nada todavía, no vale la pena ocupar espacio en el header.
+  const rachaEl = $('rachaPill');
+  if (s.rachaActual >= 2 && s.rachaTipo) {
+    rachaEl.style.display = 'inline-flex';
+    rachaEl.className = 'pill racha-' + s.rachaTipo;
+    rachaEl.textContent = s.rachaTipo === 'wins' ? `🔥 ${s.rachaActual} wins seguidos` : `⚠️ ${s.rachaActual} losses seguidos`;
+  } else {
+    rachaEl.style.display = 'none';
+  }
+
   // Card HOY
   const hoyPnlEl = $('cardHoyPnl');
   hoyPnlEl.textContent = fmtUsd(s.pnlHoy);
@@ -95,7 +112,10 @@ function renderSummary(s) {
   $('cardIaXgb').textContent = s.xgboostAccuracy !== null && s.xgboostAccuracy !== undefined
     ? `${s.xgboostAccuracy.toFixed(1)}% acc`
     : 'sin modelo';
-  $('cardIaLearnings').textContent = s.aprendizajesHoy ?? '—';
+  const learningsTrendTxt = s.aprendizajesAyer !== null && s.aprendizajesAyer !== undefined
+    ? ` (${s.aprendizajesHoy >= s.aprendizajesAyer ? '↑' : '↓'} vs ${s.aprendizajesAyer} ayer)`
+    : '';
+  $('cardIaLearnings').textContent = `${s.aprendizajesHoy ?? '—'}${learningsTrendTxt}`;
 
   lastSummaryFetchAt = Date.now();
 }
@@ -117,7 +137,7 @@ function tickLastUpdate() {
   $('lastUpdateText').textContent = `Última act: hace ${secs}s`;
 }
 
-// ---------- TAB 1: Posiciones ----------
+// ---------- TAB TRADES — sub-tab ABIERTOS ----------
 const MAX_POSICIONES_VISIBLES = 10;
 
 function renderPosiciones(list) {
@@ -133,7 +153,7 @@ function renderPosiciones(list) {
     <div class="pos-row">
       <div class="pair">${p.par}</div>
       <div><div class="cell-label">Invertido</div><div class="cell-value">${fmtUsd(p.invertido)}</div></div>
-      <div><div class="cell-label">PnL actual</div><div class="cell-value ${pnlClass(p.pnlActual)}">${fmtUsd(p.pnlActual)}</div></div>
+      <div><div class="cell-label">PnL actual</div><div class="cell-value ${pnlClass(p.pnlActual)}">${fmtUsd(p.pnlActual)} ${p.pnlActual >= 0 ? '✅' : '🔴'}</div></div>
       <div><div class="cell-label">Tiempo</div><div class="cell-value">${p.tiempoAbierto || '—'}</div></div>
     </div>
   `).join('');
@@ -155,6 +175,103 @@ async function loadPosiciones(force = false) {
   }
 }
 
+// ---------- TAB TRADES — sub-tab HISTORIAL ----------
+// Estado de filtro/página en memoria (no en la URL, no hace falta persistir
+// entre visitas) — cambiar de filtro siempre vuelve a página 1.
+const historialState = { filter: 'all', page: 1 };
+
+function renderHistorial(data) {
+  const container = $('historialList');
+  const pagination = $('historialPagination');
+  const trades = (data && data.trades) || [];
+
+  if (trades.length === 0) {
+    container.innerHTML = '<div class="empty-state">Sin trades cerrados para este filtro.</div>';
+    pagination.style.display = 'none';
+    return;
+  }
+
+  container.innerHTML = trades.map((t) => {
+    const isWin = t.outcome === 'win';
+    const hora = (t.fecha || '').slice(11, 16) + ' UTC';
+    return `
+      <div class="hist-row ${isWin ? 'win' : 'loss'}">
+        <div class="hist-top">
+          <div class="hist-par">${t.par}</div>
+          <div class="hist-resultado ${isWin ? 'win' : 'loss'}">${isWin ? 'WIN ✅' : 'LOSS 🔴'}</div>
+        </div>
+        <div class="hist-cell hist-extra"><div class="cell-label">Estrategia</div><div class="cell-value">${t.estrategia || '—'}</div></div>
+        <div class="hist-cell hist-extra"><div class="cell-label">Nivel</div><div class="cell-value">${t.nivel ?? '—'}</div></div>
+        <div class="hist-cell hist-extra"><div class="cell-label">Entrada</div><div class="cell-value">${t.entrada ?? '—'}</div></div>
+        <div class="hist-cell hist-extra"><div class="cell-label">Salida</div><div class="cell-value">${t.salida ?? '—'}</div></div>
+        <div class="hist-cell hist-pnl"><div class="cell-label">PnL</div><div class="cell-value ${pnlClass(t.pnl)}">${fmtUsd(t.pnl)}</div></div>
+        <div class="hist-cell"><div class="cell-label">Duración</div><div class="cell-value">${t.duracion || '—'}</div></div>
+        <div class="hist-cell"><div class="cell-label">Hora</div><div class="cell-value">${hora}</div></div>
+      </div>
+    `;
+  }).join('');
+
+  pagination.style.display = 'flex';
+  $('paginationInfo').textContent = `Página ${data.page} de ${data.totalPages}`;
+  $('paginationPrev').disabled = data.page <= 1;
+  $('paginationNext').disabled = data.page >= data.totalPages;
+}
+
+async function loadHistorial(force = false) {
+  try {
+    const path = `/api/trades-history?limit=20&filter=${historialState.filter}&page=${historialState.page}`;
+    const data = await fetchJson(path, { force });
+    renderHistorial(data);
+  } catch (err) {
+    $('historialList').innerHTML = '<div class="empty-state">No se pudo cargar el historial (reintentando…)</div>';
+  }
+}
+
+document.querySelectorAll('.filter-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.filter === historialState.filter) return;
+    document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    historialState.filter = btn.dataset.filter;
+    historialState.page = 1;
+    loadHistorial(true);
+  });
+});
+$('paginationPrev').addEventListener('click', () => {
+  if (historialState.page <= 1) return;
+  historialState.page -= 1;
+  loadHistorial(true);
+});
+$('paginationNext').addEventListener('click', () => {
+  historialState.page += 1;
+  loadHistorial(true);
+});
+
+// ---------- TAB TRADES — sub-tabs (Abiertos / Historial) ----------
+const SUBTAB_LOADERS = { abiertos: loadPosiciones, historial: loadHistorial };
+const subtabLoadedOnce = new Set();
+let activeSubtab = 'abiertos';
+
+function switchSubtab(subtab) {
+  if (subtab === activeSubtab) return;
+  activeSubtab = subtab;
+  document.querySelectorAll('.subtab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.subtab === subtab));
+  document.querySelectorAll('.subtab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `subtab-${subtab}`));
+  subtabLoadedOnce.add(subtab);
+  SUBTAB_LOADERS[subtab]();
+}
+
+document.querySelectorAll('.subtab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchSubtab(btn.dataset.subtab));
+});
+
+// Loader único para la tab "trades" (lo que usa el orquestador de tabs de
+// más abajo): carga/refresca solo la sub-tab activa ahora mismo.
+function loadTradesTab(force = false) {
+  subtabLoadedOnce.add(activeSubtab);
+  return SUBTAB_LOADERS[activeSubtab](force);
+}
+
 // ---------- TAB 2: Estrategias ----------
 function renderEstrategias(list) {
   const container = $('estrategiasList');
@@ -162,14 +279,22 @@ function renderEstrategias(list) {
     container.innerHTML = '<div class="empty-state">Sin datos de estrategias todavía.</div>';
     return;
   }
+  const trendIcon = { up: '↗️', down: '↘️', same: '→' };
+  const trendClass = { up: 'trend-up', down: 'trend-down', same: 'trend-same' };
+
   container.innerHTML = list.map((s) => {
     const pfBadge = s.pfHoy >= 2.0 ? '🌟' : s.pfHoy >= 1.0 ? '✅' : (s.tradesHoy > 0 ? '⚠️' : '');
     const slots = s.slotsTotal !== null ? `${s.slotsOcupados}/${s.slotsTotal} slots ocupados` : `${s.slotsOcupados} posiciones`;
+    const mejorParTxt = s.mejorPar ? `Mejor par: <span class="hl">${s.mejorPar.pair}</span> (${fmtUsd(s.mejorPar.pnl)})` : '';
     return `
       <div class="strat-card">
-        <div class="strat-header">${s.emoji} ${s.nombre}</div>
+        <div class="strat-header">
+          <span>${s.emoji} ${s.nombre}</span>
+          <span class="${trendClass[s.pfTrend] || 'trend-same'}">${trendIcon[s.pfTrend] || '→'}</span>
+        </div>
         <div class="strat-line">Trades hoy: <span class="hl">${s.tradesHoy}</span> | WR: <span class="hl">${s.wrHoy}%</span> | PF: <span class="hl">${s.pfHoy.toFixed(2)}</span> <span class="badge">${pfBadge}</span></div>
         <div class="strat-line">Capital: <span class="hl">${fmtUsd(s.capital)}</span> | ${slots}</div>
+        ${mejorParTxt ? `<div class="strat-line">${mejorParTxt}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -200,10 +325,16 @@ function renderAnalisis(d) {
   }).join('');
 
   container.innerHTML = `
-    <div class="diary-title">${d.titular || 'Análisis Cripto Diario'}</div>
-    <div class="diary-body">${(d.analisis || '').replace(/</g, '&lt;')}</div>
-    ${chips ? `<div class="market-grid">${chips}</div>` : ''}
-    <div class="diary-meta">Nuvera Research · ${d.creadoEn || ''}</div>
+    <div class="diary-grid">
+      <div class="diary-main">
+        <div class="diary-title">${d.titular || 'Análisis Cripto Diario'}</div>
+        <div class="diary-body">${(d.analisis || '').replace(/</g, '&lt;')}</div>
+        <div class="diary-meta">Nuvera Research · ${d.creadoEn || ''}</div>
+      </div>
+      <div class="diary-side">
+        ${chips ? `<div class="market-grid">${chips}</div>` : ''}
+      </div>
+    </div>
   `;
 }
 
@@ -297,13 +428,13 @@ async function loadSistema(force = false) {
 
 // ---------- Tabs: cambio instantáneo, carga perezosa una sola vez ----------
 const TAB_LOADERS = {
-  posiciones: loadPosiciones,
+  trades: loadTradesTab,
   estrategias: loadEstrategias,
   analisis: loadAnalisis,
   sistema: loadSistema,
 };
 const tabLoadedOnce = new Set();
-let activeTab = 'posiciones';
+let activeTab = 'trades';
 
 function switchTab(tab) {
   if (tab === activeTab) return;

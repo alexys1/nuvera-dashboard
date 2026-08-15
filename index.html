@@ -264,6 +264,31 @@
   /* ---------- Chart ---------- */
   .chart-wrap { position: relative; height: 260px; }
 
+  /* ---------- Capital en tiempo real (estilo Binance, pedido explícito 2026-08-15) ---------- */
+  .rt-chart-panel { padding-bottom: 14px; }
+  .rt-chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+  .rt-chart-title { display: flex; align-items: center; gap: 10px; }
+  .rt-chart-title h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 600; }
+  .rt-chart-live {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 800;
+    letter-spacing: 0.06em; color: var(--accent); background: var(--accent-dim);
+    border: 1px solid rgba(0,255,136,0.35); border-radius: 20px; padding: 3px 9px;
+  }
+  .rt-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: blink 2s ease-in-out infinite; }
+  .rt-chart-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .rt-stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+  .rt-stat-label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 3px; }
+  .rt-stat-value { display: block; font-size: 15px; font-weight: 700; }
+  .rt-chart-wrap { position: relative; width: 100%; height: 300px; }
+  .rt-chart-tooltip {
+    position: absolute; z-index: 5; pointer-events: none;
+    background: #1c2330; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+    padding: 6px 10px; font-size: 12px; line-height: 1.5; white-space: nowrap;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  }
+  .rt-tt-time { color: var(--text-muted); font-size: 10px; }
+  .rt-tt-value { color: var(--text-primary); font-weight: 700; font-family: 'Roboto Mono', monospace; }
+
   /* ---------- Pares activos (cards visuales) ---------- */
   .active-pair-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
   .active-pair-card {
@@ -483,6 +508,43 @@
       <div class="last-update" id="last-update">actualizando…</div>
     </div>
   </header>
+
+  <!-- 0a. Capital en tiempo real, estilo Binance (pedido explícito 2026-08-15) -->
+  <section class="panel rt-chart-panel">
+    <div class="rt-chart-head">
+      <div class="rt-chart-title">
+        <h2>📈 Capital en tiempo real</h2>
+        <span class="rt-chart-live"><span class="rt-live-dot"></span>EN VIVO</span>
+      </div>
+      <div class="panel-controls" id="rt-chart-periods">
+        <button class="btn-tab" data-rtperiod="1h">1H</button>
+        <button class="btn-tab" data-rtperiod="6h">6H</button>
+        <button class="btn-tab active" data-rtperiod="24h">24H</button>
+        <button class="btn-tab" data-rtperiod="7d">7D</button>
+        <button class="btn-tab" data-rtperiod="todo">Todo</button>
+      </div>
+    </div>
+    <div class="rt-chart-stats">
+      <div class="rt-stat">
+        <span class="rt-stat-label">Capital actual</span>
+        <span class="rt-stat-value mono" id="rt-stat-actual">—</span>
+      </div>
+      <div class="rt-stat">
+        <span class="rt-stat-label">Máximo del período</span>
+        <span class="rt-stat-value mono" id="rt-stat-max">—</span>
+      </div>
+      <div class="rt-stat">
+        <span class="rt-stat-label">Mínimo del período</span>
+        <span class="rt-stat-value mono" id="rt-stat-min">—</span>
+      </div>
+      <div class="rt-stat">
+        <span class="rt-stat-label">Variación</span>
+        <span class="rt-stat-value mono" id="rt-stat-var">—</span>
+      </div>
+    </div>
+    <div id="rt-capital-chart" class="rt-chart-wrap"></div>
+    <div class="empty-msg" id="rt-chart-empty" style="display:none;">Sin datos de capital todavía en este período.</div>
+  </section>
 
   <!-- 0. Mi Capital (distribución) -->
   <section class="panel cb-panel">

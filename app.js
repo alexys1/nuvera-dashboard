@@ -900,6 +900,180 @@ async function refreshCapitalChart() {
   }
 }
 
+// ---------- Chart: capital en tiempo real, estilo Binance (2026-08-15, pedido explícito) ----------
+// Distinto del gráfico de arriba (Chart.js, agregado por hora/día): este usa
+// Lightweight Charts sobre puntos CRUDOS de capital_log (GET
+// /api/capital-chart) + marcadores de wins/losses grandes (GET
+// /api/capital-markers), con polling propio cada 30s (spec explícita del
+// pedido, distinto de los 5s del resto del dashboard) para que la línea se
+// "extienda" sola sin recargar la página.
+const RT_CHART_REFRESH_MS = 30000;
+
+let rtChart = null;
+let rtSeries = null;
+let rtInitialPriceLine = null;
+let rtInitialPriceLineValue = null;
+let rtCurrentPeriod = '24h';
+
+function rtFmtTime(unixSeconds) {
+  const d = new Date(unixSeconds * 1000);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+function rtFmtDateTime(unixSeconds) {
+  const d = new Date(unixSeconds * 1000);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+  return `${rtFmtTime(unixSeconds)} UTC · ${dd}/${mo}`;
+}
+
+function ensureRtChart() {
+  if (rtChart || typeof LightweightCharts === 'undefined') return rtChart;
+  const container = $('rt-capital-chart');
+  rtChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 300,
+    layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: false,
+      borderColor: 'rgba(255,255,255,0.08)',
+      tickMarkFormatter: (time) => rtFmtTime(time),
+    },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+    crosshair: { mode: 0 },
+  });
+  rtSeries = rtChart.addAreaSeries({
+    lineColor: '#00ff88',
+    topColor: 'rgba(0,255,136,0.28)',
+    bottomColor: 'rgba(0,255,136,0.02)',
+    lineWidth: 2,
+    priceLineVisible: false,
+    lastValueVisible: true,
+  });
+
+  // Tooltip flotante propio (estilo Binance: hora exacta + capital al pasar
+  // el mouse) — Lightweight Charts no trae uno incorporado, se arma sobre
+  // subscribeCrosshairMove, mismo patrón que el resto del dashboard usa
+  // divs absolutos sobre un contenedor position:relative.
+  const tooltip = document.createElement('div');
+  tooltip.className = 'rt-chart-tooltip';
+  tooltip.style.display = 'none';
+  container.appendChild(tooltip);
+
+  rtChart.subscribeCrosshairMove((param) => {
+    if (!param.point || !param.time || param.point.x < 0 || param.point.y < 0 || !rtSeries) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    const data = param.seriesData.get(rtSeries);
+    if (!data || data.value === undefined) {
+      tooltip.style.display = 'none';
+      return;
+    }
+    tooltip.innerHTML = `<div class="rt-tt-time">${rtFmtDateTime(param.time)}</div><div class="rt-tt-value">${fmtUsd(data.value)}</div>`;
+    tooltip.style.display = 'block';
+    const tooltipWidth = 130;
+    let left = param.point.x + 14;
+    if (left > container.clientWidth - tooltipWidth) left = param.point.x - tooltipWidth - 4;
+    tooltip.style.left = `${Math.max(0, left)}px`;
+    tooltip.style.top = `${Math.max(0, param.point.y - 44)}px`;
+  });
+
+  window.addEventListener('resize', () => {
+    if (rtChart) rtChart.applyOptions({ width: container.clientWidth });
+  });
+
+  return rtChart;
+}
+
+function updateRtStats(points) {
+  const empty = points.length === 0;
+  $('rt-chart-empty').style.display = empty ? 'block' : 'none';
+  $('rt-capital-chart').style.display = empty ? 'none' : 'block';
+  if (empty) {
+    ['rt-stat-actual', 'rt-stat-max', 'rt-stat-min', 'rt-stat-var'].forEach((id) => { $(id).textContent = '—'; });
+    return;
+  }
+
+  let maxPoint = points[0];
+  let minPoint = points[0];
+  for (const p of points) {
+    if (p.value > maxPoint.value) maxPoint = p;
+    if (p.value < minPoint.value) minPoint = p;
+  }
+  const actual = points[points.length - 1].value;
+  const primero = points[0].value;
+  const variacion = actual - primero;
+  const variacionPct = primero !== 0 ? (variacion / primero) * 100 : 0;
+
+  const actualEl = $('rt-stat-actual');
+  actualEl.textContent = fmtUsd(actual);
+  actualEl.className = `rt-stat-value mono ${capitalInicialRef !== null ? pnlClass(actual - capitalInicialRef) : ''}`;
+
+  $('rt-stat-max').textContent = `${fmtUsd(maxPoint.value)} (${rtFmtDateTime(maxPoint.time)})`;
+  $('rt-stat-min').textContent = `${fmtUsd(minPoint.value)} (${rtFmtDateTime(minPoint.time)})`;
+
+  const varEl = $('rt-stat-var');
+  varEl.textContent = `${variacion >= 0 ? '+' : ''}${fmtUsd(variacion)} (${fmtPct(variacionPct)})`;
+  varEl.className = `rt-stat-value mono ${pnlClass(variacion)}`;
+}
+
+function renderRtCapitalChart(points, markers, fit) {
+  const chart = ensureRtChart();
+  updateRtStats(points);
+  if (!chart || !rtSeries) return;
+  if (points.length === 0) { rtSeries.setData([]); return; }
+
+  const lastValue = points[points.length - 1].value;
+  const trendUp = capitalInicialRef === null || lastValue >= capitalInicialRef;
+  const lineColor = trendUp ? '#00ff88' : '#ff4444';
+  rtSeries.applyOptions({
+    lineColor,
+    topColor: trendUp ? 'rgba(0,255,136,0.28)' : 'rgba(255,68,68,0.28)',
+    bottomColor: trendUp ? 'rgba(0,255,136,0.02)' : 'rgba(255,68,68,0.02)',
+  });
+
+  rtSeries.setData(points);
+  rtSeries.setMarkers(markers);
+
+  // Línea horizontal punteada en el capital inicial de referencia (pedido
+  // explícito: "$200") — se lee de capitalInicialRef (viene de
+  // status.capitalInicial, ver refreshAll) en vez de hardcodearlo, así nunca
+  // queda desalineada si el bot arranca con otro capital inicial.
+  if (capitalInicialRef !== null && capitalInicialRef !== rtInitialPriceLineValue) {
+    if (rtInitialPriceLine) rtSeries.removePriceLine(rtInitialPriceLine);
+    rtInitialPriceLine = rtSeries.createPriceLine({
+      price: capitalInicialRef,
+      color: '#8b949e',
+      lineWidth: 1,
+      lineStyle: LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: `Inicial $${capitalInicialRef.toFixed(0)}`,
+    });
+    rtInitialPriceLineValue = capitalInicialRef;
+  }
+
+  if (fit) chart.timeScale().fitContent();
+}
+
+async function loadRtCapitalChart(period, fit) {
+  rtCurrentPeriod = period;
+  try {
+    const [points, markers] = await Promise.all([
+      fetchJson(`/api/capital-chart?period=${period}`),
+      fetchJson(`/api/capital-markers?period=${period}`),
+    ]);
+    renderRtCapitalChart(points, markers, fit);
+  } catch (err) {
+    console.error('[nuvera-dashboard] Error cargando capital en tiempo real:', err.message);
+  }
+}
+
+async function refreshRtCapitalChart() {
+  await loadRtCapitalChart(rtCurrentPeriod, false);
+}
+
 // ---------- Alertas en vivo (sección 11) ----------
 let lastSeenTradeIso = null;
 let firstTradesLoad = true;
@@ -998,6 +1172,14 @@ async function refreshAll() {
 }
 
 // ---------- Listeners de controles ----------
+document.getElementById('rt-chart-periods').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-rtperiod]');
+  if (!btn) return;
+  document.querySelectorAll('#rt-chart-periods .btn-tab').forEach((b) => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadRtCapitalChart(btn.dataset.rtperiod, true);
+});
+
 document.getElementById('chart-zoom-controls').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-chartrange]');
   if (!btn) return;
@@ -1026,3 +1208,10 @@ $('btn-export-csv').addEventListener('click', exportTradesCsv);
 
 refreshAll();
 setInterval(refreshAll, REFRESH_MS);
+
+// Ciclo propio de 30s para el gráfico de capital en tiempo real (pedido
+// explícito: "se actualiza cada 30 segundos"), independiente del polling de
+// 5s del resto del dashboard — capitalInicialRef ya queda seteado por el
+// primer refreshAll() de arriba (ambos arrancan casi en simultáneo).
+loadRtCapitalChart(rtCurrentPeriod, true);
+setInterval(refreshRtCapitalChart, RT_CHART_REFRESH_MS);

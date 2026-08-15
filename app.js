@@ -254,6 +254,10 @@ let activeSubtab = 'abiertos';
 
 function switchSubtab(subtab) {
   if (subtab === activeSubtab) return;
+  if (!SUBTAB_LOADERS[subtab]) {
+    console.warn('Sub-tab desconocida (sin loader registrado):', subtab);
+    return;
+  }
   activeSubtab = subtab;
   document.querySelectorAll('.subtab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.subtab === subtab));
   document.querySelectorAll('.subtab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `subtab-${subtab}`));
@@ -438,6 +442,14 @@ let activeTab = 'trades';
 
 function switchTab(tab) {
   if (tab === activeTab) return;
+  // Defensivo (2026-08-16): si el botón no tiene un loader registrado (data-tab
+  // mal escrito, o un botón nuevo agregado al HTML sin su entrada en
+  // TAB_LOADERS), avisar en consola en vez de tirar "TAB_LOADERS[tab] is not
+  // a function" y dejar la tab a medio cambiar.
+  if (!TAB_LOADERS[tab]) {
+    console.warn('Tab desconocida (sin loader registrado):', tab);
+    return;
+  }
   activeTab = tab;
   document.querySelectorAll('.tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${tab}`));
@@ -445,12 +457,8 @@ function switchTab(tab) {
   // Instantáneo: el panel cambia ya (arriba). Si esta tab nunca cargó datos,
   // se pide ahora en segundo plano; si ya cargó, el caché decide si hace
   // falta refrescar (ver fetchJson) — nunca bloquea el cambio visual de tab.
-  if (!tabLoadedOnce.has(tab)) {
-    tabLoadedOnce.add(tab);
-    TAB_LOADERS[tab]();
-  } else {
-    TAB_LOADERS[tab]();
-  }
+  tabLoadedOnce.add(tab);
+  TAB_LOADERS[tab]();
 }
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {

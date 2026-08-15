@@ -450,6 +450,7 @@
   .conf-bar-fill { height: 100%; }
   .conf-val { width: 82px; text-align: right; color: var(--text-secondary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .conf-scroll { max-height: 260px; overflow-y: auto; }
+  .ml-features-title { font-size: 12px; color: var(--text-secondary); margin: 16px 0 6px; }
 
   /* Aprendizajes */
   .learning { padding: 9px 0; border-bottom: 1px solid var(--grid-line); font-size: 12.5px; }
@@ -643,6 +644,30 @@
       <div id="learnings-list"></div>
     </section>
   </div>
+
+  <!-- Modelo ML propio, XGBoost entrenado automáticamente (pedido explícito 2026-08-15) -->
+  <section class="panel">
+    <h2>🤖 Modelo ML (XGBoost)</h2>
+    <div id="ml-model-content">
+      <div class="rt-chart-stats" id="ml-model-stats">
+        <div class="rt-stat">
+          <span class="rt-stat-label">Accuracy</span>
+          <span class="rt-stat-value mono" id="ml-accuracy">—</span>
+        </div>
+        <div class="rt-stat">
+          <span class="rt-stat-label">Trades analizados</span>
+          <span class="rt-stat-value mono" id="ml-trades">—</span>
+        </div>
+        <div class="rt-stat">
+          <span class="rt-stat-label">Último entrenamiento</span>
+          <span class="rt-stat-value mono" id="ml-trained-at">—</span>
+        </div>
+      </div>
+      <div class="ml-features-title">Factores que más pesan en la predicción</div>
+      <div id="ml-features-list"></div>
+    </div>
+    <div class="empty-msg" id="ml-model-empty" style="display:none;">Todavía no hay un modelo XGBoost activo (se entrena solo cada lunes 03:00 UTC o al juntar 200 trades nuevos).</div>
+  </section>
 
   <!-- 3b. Diario del bot (estilo Binance Square, pedido explícito 2026-08-12) -->
   <section class="panel">

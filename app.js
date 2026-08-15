@@ -287,6 +287,31 @@ function renderConfidence(rows) {
   `).join('');
 }
 
+// ---------- Render: modelo ML propio (XGBoost, pedido explícito 2026-08-15) ----------
+function renderMlModel(data) {
+  const empty = !data || !data.disponible;
+  $('ml-model-content').style.display = empty ? 'none' : 'block';
+  $('ml-model-empty').style.display = empty ? 'block' : 'none';
+  if (empty) return;
+
+  $('ml-accuracy').textContent = `${data.accuracy.toFixed(1)}%`;
+  $('ml-accuracy').className = `rt-stat-value mono ${data.accuracy > 52 ? 'pnl-pos' : 'pnl-neg'}`;
+  $('ml-trades').textContent = data.totalTrades;
+  $('ml-trained-at').textContent = data.entrenadoEl || '—';
+
+  const feats = data.featuresPrincipales || [];
+  const maxImportancia = Math.max(...feats.map((f) => f.importancia), 0.001);
+  $('ml-features-list').innerHTML = feats.length > 0
+    ? feats.map((f) => `
+      <div class="conf-row">
+        <span class="conf-pair mono">${f.nombre}</span>
+        <span class="conf-bar-bg"><span class="conf-bar-fill" style="width:${(f.importancia / maxImportancia) * 100}%; background:var(--accent-2)"></span></span>
+        <span class="conf-val mono">${(f.importancia * 100).toFixed(1)}%</span>
+      </div>
+    `).join('')
+    : '<div class="empty-msg">Sin datos de importancia.</div>';
+}
+
 // ---------- Render: aprendizajes de Ollama (2026-08-11, pedido explícito) ----------
 function renderLearnings(rows) {
   const box = $('learnings-list');
@@ -1107,7 +1132,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday, bestWorstToday, diaryToday, diaryHistory] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday, bestWorstToday, diaryToday, diaryHistory, mlModel] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -1130,6 +1155,7 @@ async function refreshAll() {
       fetchJson('/api/best-worst-pairs-today'),
       fetchJson('/api/diary/today'),
       fetchJson('/api/diary/history?days=7'),
+      fetchJson('/api/ml-model'),
     ]);
 
     setConnWarning(false);
@@ -1142,6 +1168,7 @@ async function refreshAll() {
     renderMood(mood);
     renderConfidence(confidence);
     renderLearnings(learnings);
+    renderMlModel(mlModel);
     renderPositions(positions);
     renderActivePairs(pairs);
     renderPairsHistory(pairsHistory);

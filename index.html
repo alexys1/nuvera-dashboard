@@ -452,6 +452,28 @@
   .conf-scroll { max-height: 260px; overflow-y: auto; }
   .ml-features-title { font-size: 12px; color: var(--text-secondary); margin: 16px 0 6px; }
 
+  /* ---------- Salud del Sistema (5 mejoras, pedido explícito 2026-08-16) ---------- */
+  .salud-block { margin-bottom: 18px; }
+  .salud-block:last-child { margin-bottom: 0; }
+  .salud-block-title { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .regime-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .regime-badge { font-size: 15px; font-weight: 700; padding: 5px 12px; border-radius: 20px; background: var(--surface-2); border: 1px solid var(--border); }
+  .regime-badge.alcista { color: var(--accent); border-color: rgba(0,255,136,0.35); background: var(--accent-dim); }
+  .regime-badge.bajista { color: var(--critical); border-color: rgba(248,81,73,0.35); background: var(--critical-dim); }
+  .regime-badge.lateral { color: var(--accent-2); border-color: rgba(88,166,255,0.35); background: var(--accent-2-dim); }
+  .regime-detail { font-size: 12px; color: var(--text-secondary); }
+  .strat-health-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; font-size: 13px; border-bottom: 1px solid var(--border); }
+  .strat-health-row:last-child { border-bottom: none; }
+  .strat-health-name { width: 130px; flex-shrink: 0; font-weight: 600; }
+  .strat-health-pf { width: 90px; flex-shrink: 0; font-family: 'Roboto Mono', monospace; color: var(--text-secondary); }
+  .strat-health-salud { flex: 1; }
+  .strat-health-capital { color: var(--text-muted); font-size: 12px; text-align: right; }
+  .strat-health-pausada { color: var(--critical); font-size: 11px; font-weight: 700; margin-left: 8px; }
+  .corr-groups-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .corr-tag { font-size: 12px; padding: 4px 10px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-secondary); }
+  .corr-tag.activo { color: var(--warning); border-color: rgba(240,160,32,0.35); background: var(--warning-dim); }
+  .corr-tag.disponible { color: var(--accent); border-color: rgba(0,255,136,0.3); background: var(--accent-dim); }
+
   /* Aprendizajes */
   .learning { padding: 9px 0; border-bottom: 1px solid var(--grid-line); font-size: 12.5px; }
   .learning:last-child { border-bottom: none; }
@@ -667,6 +689,39 @@
       <div id="ml-features-list"></div>
     </div>
     <div class="empty-msg" id="ml-model-empty" style="display:none;">Todavía no hay un modelo XGBoost activo (se entrena solo cada lunes 03:00 UTC o al juntar 200 trades nuevos).</div>
+  </section>
+
+  <!-- 5 mejoras de autosostenibilidad: Salud del Sistema (pedido explícito 2026-08-16) -->
+  <section class="panel">
+    <h2>🌡️ Salud del Sistema</h2>
+
+    <div class="salud-block">
+      <div class="salud-block-title">Régimen de mercado</div>
+      <div class="regime-row">
+        <span class="regime-badge" id="regime-badge">— —</span>
+        <span class="regime-detail" id="regime-detail">—</span>
+      </div>
+    </div>
+
+    <div class="salud-block">
+      <div class="salud-block-title">📊 Salud de estrategias</div>
+      <div id="strategy-health-list"></div>
+    </div>
+
+    <div class="salud-block">
+      <div class="salud-block-title">🔗 Anti-correlación</div>
+      <div id="correlation-content"></div>
+    </div>
+
+    <div class="salud-block">
+      <div class="salud-block-title">💰 Próxima reinversión</div>
+      <div class="progress-track">
+        <div class="progress-fill" id="reinvestment-progress" style="width:0%"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="reinvestment-detalle">—</span>
+      </div>
+    </div>
   </section>
 
   <!-- 3b. Diario del bot (estilo Binance Square, pedido explícito 2026-08-12) -->

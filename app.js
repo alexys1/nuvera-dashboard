@@ -312,6 +312,80 @@ function renderMlModel(data) {
     : '<div class="empty-msg">Sin datos de importancia.</div>';
 }
 
+// ---------- Render: Salud del Sistema, 5 mejoras (pedido explícito 2026-08-16) ----------
+
+function renderRegime(data) {
+  const badge = $('regime-badge');
+  const detail = $('regime-detail');
+  if (!data || !data.disponible) {
+    badge.textContent = '— sin datos';
+    badge.className = 'regime-badge';
+    detail.textContent = 'Esperando el primer chequeo horario.';
+    return;
+  }
+  badge.textContent = `${data.emoji} ${data.label}`;
+  badge.className = `regime-badge ${data.regimen.toLowerCase()}`;
+  const btc7dTxt = data.btc7d !== null ? `${data.btc7d >= 0 ? '+' : ''}${data.btc7d.toFixed(1)}%` : '—';
+  const modoTxt = data.regimen === 'LATERAL'
+    ? 'NORMAL (parámetros estándar)'
+    : `tamaño x${data.sizeMultiplier} · TP x${data.tpMultiplier}${data.soloBlueChips ? ' · solo BTC/ETH/BNB' : ''}`;
+  detail.textContent = `BTC 7d: ${btc7dTxt} | F&G: ${data.fg ?? '—'} | Modo: ${modoTxt}`;
+}
+
+const SALUD_TAG = { CRITICA: '🔴 CRÍTICA', DEBIL: '⚠️ DÉBIL', NORMAL: '✅ NORMAL', EXCELENTE: '🌟 EXCELENTE' };
+
+function renderStrategyHealth(rows) {
+  const box = $('strategy-health-list');
+  if (!rows || rows.length === 0) { box.innerHTML = '<div class="empty-msg">Todavía sin evaluación (corre los lunes 04:00 UTC).</div>'; return; }
+  box.innerHTML = rows.map((r) => {
+    const pfTxt = r.pf14d === null ? '—' : `PF=${r.pf14d.toFixed(2)}`;
+    const capTxt = r.capitalAsignado !== null ? `$${r.capitalAsignado.toFixed(0)}` : '(dinámico)';
+    return `
+      <div class="strat-health-row">
+        <span class="strat-health-name">${r.estrategia}</span>
+        <span class="strat-health-pf">${pfTxt}</span>
+        <span class="strat-health-salud">${SALUD_TAG[r.salud] || r.salud}${r.pausada ? '<span class="strat-health-pausada">PAUSADA</span>' : ''}</span>
+        <span class="strat-health-capital">${capTxt}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCorrelation(data) {
+  const box = $('correlation-content');
+  if (!data) { box.innerHTML = '<div class="empty-msg">Sin datos.</div>'; return; }
+  const activos = Object.entries(data.activos || {});
+  const activosTxt = activos.length > 0
+    ? activos.map(([grupo, pares]) => `<span class="corr-tag activo">${grupo}: ${pares.join('+')}</span>`).join('')
+    : '<span class="corr-tag">Ningún grupo con exposición ahora mismo</span>';
+  const disponiblesTxt = (data.disponibles || []).map((g) => `<span class="corr-tag disponible">${g}</span>`).join('');
+  box.innerHTML = `
+    <div class="corr-groups-row">${activosTxt}</div>
+    <div class="salud-block-title" style="margin-top:10px;">Grupos disponibles (menos de ${data.maxParesPorGrupo} pares abiertos)</div>
+    <div class="corr-groups-row">${disponiblesTxt || '<span class="corr-tag">Ninguno</span>'}</div>
+  `;
+}
+
+// Umbrales calcados de smartReinvestment.js (HITO_1_MIN/HITO_2_MIN/HITO_3_MIN) — solo para mostrar progreso, la lógica real vive en el bot.
+const REINVESTMENT_HITOS = [220, 250, 300];
+function renderReinvestment(status) {
+  if (!status || status.capital === null || status.capital === undefined) return;
+  const capital = status.capital;
+  const siguiente = REINVESTMENT_HITOS.find((h) => capital < h);
+  const fill = $('reinvestment-progress');
+  const detalle = $('reinvestment-detalle');
+  if (!siguiente) {
+    fill.style.width = '100%';
+    detalle.textContent = `Capital actual: $${capital.toFixed(2)} — ya en redistribución continua por Profit Factor (>$${REINVESTMENT_HITOS[2]}).`;
+    return;
+  }
+  const anterior = REINVESTMENT_HITOS[REINVESTMENT_HITOS.indexOf(siguiente) - 1] || status.capitalInicial || 0;
+  const pct = Math.max(0, Math.min(100, ((capital - anterior) / (siguiente - anterior)) * 100));
+  fill.style.width = `${pct.toFixed(1)}%`;
+  fill.style.background = 'var(--accent)';
+  detalle.textContent = `Capital actual: $${capital.toFixed(2)} | Umbral siguiente escala: $${siguiente} | Falta: $${(siguiente - capital).toFixed(2)}`;
+}
+
 // ---------- Render: aprendizajes de Ollama (2026-08-11, pedido explícito) ----------
 function renderLearnings(rows) {
   const box = $('learnings-list');
@@ -1132,7 +1206,7 @@ function checkForNewTrades(trades) {
 // ---------- Main loop ----------
 async function refreshAll() {
   try {
-    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday, bestWorstToday, diaryToday, diaryHistory, mlModel] = await Promise.all([
+    const [status, positions, trades, pairs, pairsHistory, blacklist, aiDecisions, system, patterns, capitalBreakdown, capitalActivo, racha, mood, confidence, learnings, health, performanceByPair, performanceByHour, iaBlocksToday, bestWorstToday, diaryToday, diaryHistory, mlModel, regime, strategyHealth, correlation] = await Promise.all([
       fetchJson('/api/status'),
       fetchJson('/api/positions'),
       fetchJson('/api/trades?limit=200'),
@@ -1156,6 +1230,9 @@ async function refreshAll() {
       fetchJson('/api/diary/today'),
       fetchJson('/api/diary/history?days=7'),
       fetchJson('/api/ml-model'),
+      fetchJson('/api/regime'),
+      fetchJson('/api/strategy-health'),
+      fetchJson('/api/correlation'),
     ]);
 
     setConnWarning(false);
@@ -1169,6 +1246,10 @@ async function refreshAll() {
     renderConfidence(confidence);
     renderLearnings(learnings);
     renderMlModel(mlModel);
+    renderRegime(regime);
+    renderStrategyHealth(strategyHealth);
+    renderCorrelation(correlation);
+    renderReinvestment(status);
     renderPositions(positions);
     renderActivePairs(pairs);
     renderPairsHistory(pairsHistory);

@@ -290,6 +290,20 @@
 
   .badge { font-size: 12px; margin-left: 4px; }
 
+  /* ---------- Detalle de motores (Motor A/B) + confianza por crypto ---------- */
+  .modo-banner { font-size: 13px; color: var(--text-sec); margin: 4px 0 12px; }
+  .modo-banner .hl { color: var(--green); font-weight: 700; }
+  .motor-subtitle { font-size: 13px; font-weight: 700; margin: 14px 0 6px; color: var(--text-sec); text-transform: uppercase; letter-spacing: 0.03em; }
+  .conf-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px; }
+  .conf-pair { width: 68px; color: var(--text-sec); flex-shrink: 0; }
+  .conf-track { flex: 1; height: 8px; background: var(--active-bg); border-radius: 4px; overflow: hidden; }
+  .conf-fill { height: 100%; border-radius: 4px; }
+  .conf-fill.alta { background: var(--green); }
+  .conf-fill.media { background: #ffb020; }
+  .conf-fill.baja { background: var(--red); }
+  .conf-fill.nuevo { background: var(--text-sec); }
+  .conf-label { width: 78px; text-align: right; color: var(--text-sec); flex-shrink: 0; }
+
   .empty-state { color: var(--text-sec); font-size: 13px; text-align: center; padding: 24px 12px; }
 
   /* ---------- Análisis ---------- */
@@ -463,6 +477,7 @@
 
     <div class="tab-panel" id="tab-estrategias">
       <div id="estrategiasList"><div class="empty-state skeleton">Cargando…</div></div>
+      <div id="motorStatusDetail"></div>
     </div>
 
     <div class="tab-panel" id="tab-analisis">

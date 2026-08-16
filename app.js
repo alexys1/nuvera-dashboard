@@ -36,6 +36,7 @@ const CACHE_TTL_MS = {
   '/api/positions': 30_000,
   '/api/trades-history': 30_000,
   '/api/strategies-today': 60_000,
+  '/api/motor-status': 30_000,
   '/api/diary/today': 30 * 60_000,
   '/api/health': 60_000,
   '/api/system': 60_000,
@@ -304,10 +305,77 @@ function renderEstrategias(list) {
   }).join('');
 }
 
+// Barras de confianza + detalle de ciclo (2026-08-16, mejoras finales,
+// pedido explícito CAMBIO 5) — consume GET /api/motor-status, que no existía
+// cuando se armó el tab Estrategias original. Ancho de la barra: PF
+// normalizado (PF=2.0 o más -> 100%, PF=0 -> apenas visible) — no es un %
+// real, es una escala visual para comparar pares entre sí de un vistazo.
+function confFillWidth(pf) {
+  if (pf === null || pf === undefined) return 8;
+  return Math.min(100, Math.max(8, (Math.min(pf, 2) / 2) * 100));
+}
+function confClass(nivel) {
+  return { ALTA: 'alta', MEDIA: 'media', BAJA: 'baja', NUEVO: 'nuevo' }[nivel] || 'nuevo';
+}
+
+function renderMotorStatus(data) {
+  const container = $('motorStatusDetail');
+  if (!data) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const modoBanner = `<div class="modo-banner">Modo: <span class="hl">${data.modo || '—'}</span> (régimen ${data.regimen || '—'})</div>`;
+
+  const motorA = data.motorA || { capital: 0, pares: [] };
+  const motorALines = (motorA.pares || []).map((p) => {
+    const detalle = p.comprasLlevadas === 0
+      ? 'sin ciclo activo, esperando caída'
+      : `ciclo ${p.comprasLlevadas}/${p.maxCompras} · promedio ${fmtUsd(p.promedioCompra)} · invertido ${fmtUsd(p.capitalInvertido)} · TP ${p.tpObjetivoPct !== null ? `+${p.tpObjetivoPct}%` : '—'}`;
+    return `<div class="strat-line">${p.pair}: <span class="hl">${detalle}</span></div>`;
+  }).join('');
+
+  const motorB = data.motorB || { capital: 0, disponible: 0, posiciones: [], maxConcurrent: 3 };
+  const motorBLines = (motorB.posiciones || []).length === 0
+    ? '<div class="strat-line">Sin posiciones activas.</div>'
+    : motorB.posiciones.map((p) => `<div class="strat-line">${p.pair}: <span class="hl">${fmtUsd(p.monto)}</span> @ ${fmtUsd(p.entryPrice)} (confianza ${p.nivelConfianza || '—'}, TP +${p.tpPct}%/SL -${p.slPct}%)</div>`).join('');
+
+  const confianzaRows = (data.confianza || []).map((c) => {
+    const pfTxt = c.pf7d === null ? '—' : (c.pf7d >= 999 ? '∞' : c.pf7d.toFixed(2));
+    return `
+      <div class="conf-row">
+        <div class="conf-pair">${c.pair.replace('/USDT', '')}</div>
+        <div class="conf-track"><div class="conf-fill ${confClass(c.nivel)}" style="width:${confFillWidth(c.pf7d)}%"></div></div>
+        <div class="conf-label">${c.nivel} (PF ${pfTxt})</div>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    ${modoBanner}
+    <div class="strat-card">
+      <div class="strat-header"><span>💰 Motor A (smartDCA) — ${fmtUsd(motorA.capital)}</span></div>
+      ${motorALines || '<div class="strat-line">Sin datos.</div>'}
+    </div>
+    <div class="strat-card">
+      <div class="strat-header"><span>🎯 Motor B (selectiveScalping) — ${fmtUsd(motorB.capital)}</span><span class="hl">${(motorB.posiciones || []).length}/${motorB.maxConcurrent}</span></div>
+      ${motorBLines}
+      <div class="strat-line">Disponible: <span class="hl">${fmtUsd(motorB.disponible)}</span></div>
+    </div>
+    <div class="strat-card">
+      <div class="strat-header"><span>📊 Confianza por crypto (7 días)</span></div>
+      ${confianzaRows || '<div class="strat-line">Sin datos todavía.</div>'}
+    </div>
+  `;
+}
+
 async function loadEstrategias(force = false) {
   try {
-    const data = await fetchJson('/api/strategies-today', { force });
+    const [data, motorStatus] = await Promise.all([
+      fetchJson('/api/strategies-today', { force }),
+      fetchJson('/api/motor-status', { force }).catch(() => null),
+    ]);
     renderEstrategias(data);
+    renderMotorStatus(motorStatus);
   } catch (err) {
     $('estrategiasList').innerHTML = '<div class="empty-state">No se pudo cargar (reintentando…)</div>';
   }

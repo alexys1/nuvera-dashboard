@@ -495,7 +495,7 @@ function fmtUptime(ms) {
   return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
 }
 
-function renderSistema([health, system, regime, mood, autonomia, cooldowns]) {
+function renderSistema([health, system, regime, mood, autonomia, cooldowns, insights]) {
   const container = $('sistemaContent');
   const errores = health.errores || {};
   const erroresHtml = errores.total24h === 0
@@ -522,6 +522,11 @@ function renderSistema([health, system, regime, mood, autonomia, cooldowns]) {
     ? 'Sin cooldowns activos.'
     : cooldownList.slice(0, 6).map((c) => `${c.pair} (libre en ${c.minutosRestantes}min)`).join(' · ');
 
+  const insightsHtml = insights && insights.disponible
+    ? `<div class="strat-line">"${insights.analisis}"</div>
+       <div class="strat-line" style="margin-top:6px; opacity:0.75;">${insights.fecha || ''}${insights.aplicado ? ' · ✅ sugerencias aplicadas' : ''}</div>`
+    : '<div class="empty-state">Todavía sin análisis estratégico (corre cada hora en punto).</div>';
+
   container.innerHTML = `
     <div class="sys-list">
       <div class="sys-item"><span class="dot ok"></span> Bot: OPERANDO <span class="val">uptime ${fmtUptime(system.botUptimeMs)}</span></div>
@@ -545,20 +550,24 @@ function renderSistema([health, system, regime, mood, autonomia, cooldowns]) {
 
     <div class="subsection-title">Cooldowns activos</div>
     <div class="strat-line">${cooldownsHtml}</div>
+
+    <div class="subsection-title">🧠 Análisis Ollama (estratega, cada hora)</div>
+    ${insightsHtml}
   `;
 }
 
 async function loadSistema(force = false) {
   try {
-    const [health, system, regime, mood, autonomia, cooldowns] = await Promise.all([
+    const [health, system, regime, mood, autonomia, cooldowns, insights] = await Promise.all([
       fetchJson('/api/health', { force }),
       fetchJson('/api/system', { force }),
       fetchJson('/api/regime', { force }),
       fetchJson('/api/market-mood', { force }),
       fetchJson('/api/autonomia', { force }),
       fetchJson('/api/cooldowns', { force }),
+      fetchJson('/api/strategy-insights', { force }),
     ]);
-    renderSistema([health, system, regime, mood, autonomia, cooldowns]);
+    renderSistema([health, system, regime, mood, autonomia, cooldowns, insights]);
   } catch (err) {
     $('sistemaContent').innerHTML = '<div class="empty-state">No se pudo cargar el estado del sistema.</div>';
   }

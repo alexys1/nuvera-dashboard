@@ -318,6 +318,16 @@ function confClass(nivel) {
   return { ALTA: 'alta', MEDIA: 'media', BAJA: 'baja', NUEVO: 'nuevo' }[nivel] || 'nuevo';
 }
 
+// Detalle de un par de Motor A (btc/eth) — shape pedido explícito
+// (2026-08-17, PROBLEMA 3): { cicloActual, compras, promedio, esperando }.
+function motorAPairLine(nombre, p) {
+  if (!p) return `<div class="strat-line">${nombre}: <span class="hl">sin datos</span></div>`;
+  const detalle = p.esperando
+    ? 'sin ciclo activo, esperando caída'
+    : `ciclo ${p.cicloActual}/${p.maxCompras} activo · promedio ${fmtUsd(p.promedio)} · invertido ${fmtUsd(p.capitalInvertido)}${p.tpObjetivoPct !== null ? ` · TP +${p.tpObjetivoPct}%` : ''}`;
+  return `<div class="strat-line">${nombre}: <span class="hl">${detalle}</span></div>`;
+}
+
 function renderMotorStatus(data) {
   const container = $('motorStatusDetail');
   if (!data) {
@@ -325,18 +335,24 @@ function renderMotorStatus(data) {
     return;
   }
 
-  const modoBanner = `<div class="modo-banner">Modo: <span class="hl">${data.modo || '—'}</span> (régimen ${data.regimen || '—'})</div>`;
+  const motorA = data.motorA || { nombre: 'DCA Estable', capitalAsignado: 0, capitalPct: 0 };
+  const motorB = data.motorB || { nombre: 'Scalping Selectivo', capitalAsignado: 0, capitalPct: 0, disponible: 0, posiciones: [], maxPosiciones: 3, cryptoConfianza: {} };
 
-  const motorA = data.motorA || { capital: 0, pares: [] };
-  const motorALines = (motorA.pares || []).map((p) => {
-    const detalle = p.comprasLlevadas === 0
-      ? 'sin ciclo activo, esperando caída'
-      : `ciclo ${p.comprasLlevadas}/${p.maxCompras} · promedio ${fmtUsd(p.promedioCompra)} · invertido ${fmtUsd(p.capitalInvertido)} · TP ${p.tpObjetivoPct !== null ? `+${p.tpObjetivoPct}%` : '—'}`;
-    return `<div class="strat-line">${p.pair}: <span class="hl">${detalle}</span></div>`;
-  }).join('');
+  // Bloque "DISTRIBUCIÓN DE CAPITAL" — pedido explícito (2026-08-17, PROBLEMA 3).
+  const distribucion = `
+    <div class="strat-card">
+      <div class="strat-header"><span>💰 DISTRIBUCIÓN DE CAPITAL</span></div>
+      <div class="strat-line">${motorA.nombre} — <span class="hl">${motorA.capitalPct}% | ${fmtUsd(motorA.capitalAsignado)}</span></div>
+      ${motorAPairLine('&nbsp;&nbsp;BTC', motorA.btc)}
+      ${motorAPairLine('&nbsp;&nbsp;ETH', motorA.eth)}
+      <div class="strat-line" style="margin-top:8px">${motorB.nombre} — <span class="hl">${motorB.capitalPct}% | ${fmtUsd(motorB.capitalAsignado)}</span></div>
+      <div class="strat-line">&nbsp;&nbsp;${motorB.posicionesActivas}/${motorB.maxPosiciones} posiciones activas · disponible ${fmtUsd(motorB.disponible)}</div>
+      <div class="strat-line" style="margin-top:8px">Régimen: <span class="hl">${data.regimen || '—'}</span> ${data.regimenMercado ? `(mercado ${data.regimenMercado})` : ''}</div>
+      <div class="strat-line">Capital libre: <span class="hl">${fmtUsd(data.capitalLibre)}</span></div>
+      ${data.modoDefensivo && data.modoDefensivo.activo ? `<div class="strat-line">🛡️ Modo defensivo activo: tamaño ${Math.round(data.modoDefensivo.multiplicador * 100)}%${data.modoDefensivo.razon ? ` — ${data.modoDefensivo.razon}` : ''}</div>` : ''}
+    </div>`;
 
-  const motorB = data.motorB || { capital: 0, disponible: 0, posiciones: [], maxConcurrent: 3 };
-  const motorBLines = (motorB.posiciones || []).length === 0
+  const motorBPosLines = (motorB.posiciones || []).length === 0
     ? '<div class="strat-line">Sin posiciones activas.</div>'
     : motorB.posiciones.map((p) => `<div class="strat-line">${p.pair}: <span class="hl">${fmtUsd(p.monto)}</span> @ ${fmtUsd(p.entryPrice)} (confianza ${p.nivelConfianza || '—'}, TP +${p.tpPct}%/SL -${p.slPct}%)</div>`).join('');
 
@@ -351,15 +367,10 @@ function renderMotorStatus(data) {
   }).join('');
 
   container.innerHTML = `
-    ${modoBanner}
+    ${distribucion}
     <div class="strat-card">
-      <div class="strat-header"><span>💰 Motor A (smartDCA) — ${fmtUsd(motorA.capital)}</span></div>
-      ${motorALines || '<div class="strat-line">Sin datos.</div>'}
-    </div>
-    <div class="strat-card">
-      <div class="strat-header"><span>🎯 Motor B (selectiveScalping) — ${fmtUsd(motorB.capital)}</span><span class="hl">${(motorB.posiciones || []).length}/${motorB.maxConcurrent}</span></div>
-      ${motorBLines}
-      <div class="strat-line">Disponible: <span class="hl">${fmtUsd(motorB.disponible)}</span></div>
+      <div class="strat-header"><span>🎯 Motor B — posiciones abiertas</span></div>
+      ${motorBPosLines}
     </div>
     <div class="strat-card">
       <div class="strat-header"><span>📊 Confianza por crypto (7 días)</span></div>

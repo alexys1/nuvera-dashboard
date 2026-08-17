@@ -102,11 +102,9 @@ function renderSummary(s) {
   const pfBadge = s.pfHoy >= 1.3 ? '🌟' : s.pfHoy >= 1.0 ? '✅' : '⚠️';
   $('cardHoyWrPf').textContent = `${s.wrHoy ?? '—'}% | ${s.pfHoy?.toFixed(2) ?? '—'} ${pfBadge}`;
 
-  // Card CAPITAL
+  // Card CAPITAL (el desglose por motor se pinta aparte, ver
+  // renderCapitalBreakdown — depende de /api/motor-status, no de este endpoint).
   $('cardCapitalTotal').textContent = fmtUsd(s.capital);
-  const pctEnTrades = s.capital > 0 ? Math.round((s.capitalEnTrades / s.capital) * 100) : 0;
-  $('cardCapitalEnTrades').textContent = `${fmtUsd(s.capitalEnTrades)} (${pctEnTrades}%)`;
-  $('cardCapitalLibre').textContent = fmtUsd(s.capitalLibre);
 
   // Card INTELIGENCIA
   $('cardIaOllama').textContent = s.ollamaOk ? '✅ en RAM' : '⚠️ no cargado';
@@ -121,10 +119,67 @@ function renderSummary(s) {
   lastSummaryFetchAt = Date.now();
 }
 
+// Desglose de capital por motor (2026-08-17, pedido explícito: "el capital
+// no está 'libre', está reservado para DCA" — antes esta card mostraba "En
+// trades $X / Libre $Y", que sugería que el resto del capital no tenía
+// destino). Reutiliza /api/motor-status (ya se consumía en el tab
+// Estrategias) — nada de esto toca el backend, es puramente visual.
+function reservaMotorAPair(p, capitalPorPair) {
+  if (!p) return 0;
+  return Math.max(0, capitalPorPair - (p.capitalInvertido || 0));
+}
+
+function renderCapitalBreakdown(motorStatus) {
+  const container = $('capitalBreakdown');
+  if (!motorStatus) {
+    container.innerHTML = '<div class="card-row"><span class="label">No se pudo cargar</span></div>';
+    return;
+  }
+
+  const motorA = motorStatus.motorA || {};
+  const motorB = motorStatus.motorB || {};
+  const capitalPorPairA = (motorA.capitalAsignado || 0) / 2; // BTC + ETH, siempre 2 pares
+  const reservaBtc = reservaMotorAPair(motorA.btc, capitalPorPairA);
+  const reservaEth = reservaMotorAPair(motorA.eth, capitalPorPairA);
+  const activoBtc = (motorA.btc && motorA.btc.capitalInvertido) || 0;
+  const activoEth = (motorA.eth && motorA.eth.capitalInvertido) || 0;
+
+  const posiciones = motorB.posiciones || [];
+  const maxPos = motorB.maxPosiciones || 3;
+  const slotsLibres = Math.max(0, maxPos - posiciones.length);
+  const activoB = posiciones.reduce((s, p) => s + p.monto, 0);
+  const reservaB = motorB.disponible || 0;
+
+  const totalActivo = activoBtc + activoEth + activoB;
+  const totalReservado = reservaBtc + reservaEth + reservaB;
+
+  const motorBLines = [
+    ...posiciones.map((p) => `<div class="cb-line">${p.pair.replace('/USDT', '')}: <span class="hl">${fmtUsd(p.monto)}</span> activo</div>`),
+    ...Array.from({ length: slotsLibres }, (_, i) => `<div class="cb-line free">Slot ${posiciones.length + i + 1}: libre (buscando señal)</div>`),
+  ].join('');
+
+  container.innerHTML = `
+    <div class="cb-motor-title">🔵 Motor A — DCA BTC/ETH</div>
+    <div class="cb-line">BTC: <span class="hl">${fmtUsd(activoBtc)}</span> activo | Reserva: <span class="hl">${fmtUsd(reservaBtc)}</span> para próx. compras</div>
+    <div class="cb-line">ETH: <span class="hl">${fmtUsd(activoEth)}</span> activo | Reserva: <span class="hl">${fmtUsd(reservaEth)}</span> para próx. compras</div>
+    <div class="cb-motor-title">🟡 Motor B — Scalping</div>
+    ${motorBLines}
+    <div class="cb-line">Reserva: <span class="hl">${fmtUsd(reservaB)}</span></div>
+    <div class="cb-summary">
+      <div class="ok">✅ Todo el capital tiene destino asignado</div>
+      <div class="cb-line">${fmtUsd(totalActivo)} activo | ${fmtUsd(totalReservado)} reservado para oportunidades</div>
+    </div>
+  `;
+}
+
 async function loadSummary(force = false) {
   try {
-    const data = await fetchJson('/api/dashboard-summary', { force });
-    renderSummary(data);
+    const [summary, motorStatus] = await Promise.all([
+      fetchJson('/api/dashboard-summary', { force }),
+      fetchJson('/api/motor-status', { force }).catch(() => null),
+    ]);
+    renderSummary(summary);
+    renderCapitalBreakdown(motorStatus);
   } catch (err) {
     console.warn('dashboard-summary falló:', err.message);
   }

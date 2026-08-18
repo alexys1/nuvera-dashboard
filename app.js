@@ -138,11 +138,22 @@ function renderCapitalBreakdown(motorStatus) {
 
   const motorA = motorStatus.motorA || {};
   const motorB = motorStatus.motorB || {};
-  const capitalPorPairA = (motorA.capitalAsignado || 0) / 2; // BTC + ETH, siempre 2 pares
-  const reservaBtc = reservaMotorAPair(motorA.btc, capitalPorPairA);
-  const reservaEth = reservaMotorAPair(motorA.eth, capitalPorPairA);
-  const activoBtc = (motorA.btc && motorA.btc.capitalInvertido) || 0;
-  const activoEth = (motorA.eth && motorA.eth.capitalInvertido) || 0;
+  // Reserva por par (2026-08-18, corrección BUG 3, pedido explícito): antes
+  // dividía capitalAsignado de Motor A / 2 a mano, asumiendo siempre 2
+  // pares con partes iguales — ya estaba mal con el split real 40/60
+  // BTC/ETH, y roto al agregar BNB (35/45/20, no un tercio parejo). Ahora
+  // /api/motor-status trae el capitalAsignado REAL de cada par (mismo
+  // cálculo que usa smartDCA.js para decidir cuánto puede comprar), así que
+  // no hace falta estimarlo acá — y el bloque queda genérico para
+  // cualquier cantidad de pares en vez de asumir 2.
+  const paresMotorA = [
+    ['BTC', motorA.btc],
+    ['ETH', motorA.eth],
+    ['BNB', motorA.bnb],
+  ].filter(([, p]) => p);
+  const reservasA = paresMotorA.map(([nombre, p]) => [nombre, reservaMotorAPair(p, p.capitalAsignado || 0)]);
+  const activoA = paresMotorA.reduce((s, [, p]) => s + (p.capitalInvertido || 0), 0);
+  const reservaATotal = reservasA.reduce((s, [, r]) => s + r, 0);
 
   const posiciones = motorB.posiciones || [];
   const maxPos = motorB.maxPosiciones || 3;
@@ -150,8 +161,12 @@ function renderCapitalBreakdown(motorStatus) {
   const activoB = posiciones.reduce((s, p) => s + p.monto, 0);
   const reservaB = motorB.disponible || 0;
 
-  const totalActivo = activoBtc + activoEth + activoB;
-  const totalReservado = reservaBtc + reservaEth + reservaB;
+  const totalActivo = activoA + activoB;
+  const totalReservado = reservaATotal + reservaB;
+
+  const motorALines = paresMotorA.map(([nombre, p], i) =>
+    `<div class="cb-line">${nombre}: <span class="hl">${fmtUsd(p.capitalInvertido || 0)}</span> activo | Reserva: <span class="hl">${fmtUsd(reservasA[i][1])}</span> para próx. compras</div>`
+  ).join('');
 
   const motorBLines = [
     ...posiciones.map((p) => `<div class="cb-line">${p.pair.replace('/USDT', '')}: <span class="hl">${fmtUsd(p.monto)}</span> activo</div>`),
@@ -159,9 +174,8 @@ function renderCapitalBreakdown(motorStatus) {
   ].join('');
 
   container.innerHTML = `
-    <div class="cb-motor-title">🔵 Motor A — DCA BTC/ETH</div>
-    <div class="cb-line">BTC: <span class="hl">${fmtUsd(activoBtc)}</span> activo | Reserva: <span class="hl">${fmtUsd(reservaBtc)}</span> para próx. compras</div>
-    <div class="cb-line">ETH: <span class="hl">${fmtUsd(activoEth)}</span> activo | Reserva: <span class="hl">${fmtUsd(reservaEth)}</span> para próx. compras</div>
+    <div class="cb-motor-title">🔵 Motor A — DCA ${paresMotorA.map(([n]) => n).join('/')}</div>
+    ${motorALines}
     <div class="cb-motor-title">🟡 Motor B — Scalping</div>
     ${motorBLines}
     <div class="cb-line">Reserva: <span class="hl">${fmtUsd(reservaB)}</span></div>
@@ -344,7 +358,7 @@ function renderEstrategias(list) {
 
   container.innerHTML = list.map((s) => {
     const pfBadge = s.pfHoy >= 2.0 ? '🌟' : s.pfHoy >= 1.0 ? '✅' : (s.tradesHoy > 0 ? '⚠️' : '');
-    const slots = s.slotsTotal !== null ? `${s.slotsOcupados}/${s.slotsTotal} slots ocupados` : `${s.slotsOcupados} posiciones`;
+    const slots = s.slotsTotal !== null ? `${s.slotsOcupados}/${s.slotsTotal} ${s.slotsLabel || 'slots ocupados'}` : `${s.slotsOcupados} posiciones`;
     const mejorParTxt = s.mejorPar ? `Mejor par: <span class="hl">${s.mejorPar.pair}</span> (${fmtUsd(s.mejorPar.pnl)})` : '';
     return `
       <div class="strat-card">
@@ -373,7 +387,7 @@ function confClass(nivel) {
   return { ALTA: 'alta', MEDIA: 'media', BAJA: 'baja', NUEVO: 'nuevo' }[nivel] || 'nuevo';
 }
 
-// Detalle de un par de Motor A (btc/eth) — shape pedido explícito
+// Detalle de un par de Motor A (btc/eth/bnb) — shape pedido explícito
 // (2026-08-17, PROBLEMA 3): { cicloActual, compras, promedio, esperando }.
 function motorAPairLine(nombre, p) {
   if (!p) return `<div class="strat-line">${nombre}: <span class="hl">sin datos</span></div>`;
@@ -400,6 +414,7 @@ function renderMotorStatus(data) {
       <div class="strat-line">${motorA.nombre} — <span class="hl">${motorA.capitalPct}% | ${fmtUsd(motorA.capitalAsignado)}</span></div>
       ${motorAPairLine('&nbsp;&nbsp;BTC', motorA.btc)}
       ${motorAPairLine('&nbsp;&nbsp;ETH', motorA.eth)}
+      ${motorAPairLine('&nbsp;&nbsp;BNB', motorA.bnb)}
       <div class="strat-line" style="margin-top:8px">${motorB.nombre} — <span class="hl">${motorB.capitalPct}% | ${fmtUsd(motorB.capitalAsignado)}</span></div>
       <div class="strat-line">&nbsp;&nbsp;${motorB.posicionesActivas}/${motorB.maxPosiciones} posiciones activas · disponible ${fmtUsd(motorB.disponible)}</div>
       <div class="strat-line" style="margin-top:8px">Régimen: <span class="hl">${data.regimen || '—'}</span> ${data.regimenMercado ? `(mercado ${data.regimenMercado})` : ''}</div>

@@ -387,8 +387,10 @@ function confClass(nivel) {
   return { ALTA: 'alta', MEDIA: 'media', BAJA: 'baja', NUEVO: 'nuevo' }[nivel] || 'nuevo';
 }
 
-// Detalle de un par de Motor A (btc/eth/bnb) — shape pedido explícito
+// Detalle de un par de Motor A (btc/eth) — shape pedido explícito
 // (2026-08-17, PROBLEMA 3): { cicloActual, compras, promedio, esperando }.
+// BNB fue 3er par entre el 2026-08-17 y el 2026-08-18 (revertido, pedido
+// explícito CAMBIO 1) — motorA.bnb ya no viene en la respuesta.
 function motorAPairLine(nombre, p) {
   if (!p) return `<div class="strat-line">${nombre}: <span class="hl">sin datos</span></div>`;
   const detalle = p.esperando
@@ -414,7 +416,6 @@ function renderMotorStatus(data) {
       <div class="strat-line">${motorA.nombre} — <span class="hl">${motorA.capitalPct}% | ${fmtUsd(motorA.capitalAsignado)}</span></div>
       ${motorAPairLine('&nbsp;&nbsp;BTC', motorA.btc)}
       ${motorAPairLine('&nbsp;&nbsp;ETH', motorA.eth)}
-      ${motorAPairLine('&nbsp;&nbsp;BNB', motorA.bnb)}
       <div class="strat-line" style="margin-top:8px">${motorB.nombre} — <span class="hl">${motorB.capitalPct}% | ${fmtUsd(motorB.capitalAsignado)}</span></div>
       <div class="strat-line">&nbsp;&nbsp;${motorB.posicionesActivas}/${motorB.maxPosiciones} posiciones activas · disponible ${fmtUsd(motorB.disponible)}</div>
       <div class="strat-line" style="margin-top:8px">Régimen: <span class="hl">${data.regimen || '—'}</span> ${data.regimenMercado ? `(mercado ${data.regimenMercado})` : ''}</div>

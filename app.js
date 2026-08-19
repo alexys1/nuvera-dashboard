@@ -173,10 +173,17 @@ function renderCapitalBreakdown(motorStatus) {
     ...Array.from({ length: slotsLibres }, (_, i) => `<div class="cb-line free">Slot ${posiciones.length + i + 1}: libre (buscando señal)</div>`),
   ].join('');
 
+  // Motor A retirado (2026-08-19, motorA.activo=false en /api/motor-status):
+  // el bot ahora corre SOLO Motor B (pedido explícito). El bloque de Motor A
+  // solo se muestra mientras queden posiciones heredadas cerrando solas
+  // (activoA > 0) — una vez que cierran, desaparece del dashboard.
+  const motorABlock = motorA.activo === false && activoA <= 0 ? '' : `
+    <div class="cb-motor-title">🔵 Motor A — DCA ${paresMotorA.map(([n]) => n).join('/')}${motorA.activo === false ? ' (retirado, cerrando)' : ''}</div>
+    ${motorALines}`;
+
   container.innerHTML = `
-    <div class="cb-motor-title">🔵 Motor A — DCA ${paresMotorA.map(([n]) => n).join('/')}</div>
-    ${motorALines}
-    <div class="cb-motor-title">🟡 Motor B — Scalping</div>
+    ${motorABlock}
+    <div class="cb-motor-title">🟡 Motor B — Scalping (único motor activo)</div>
     ${motorBLines}
     <div class="cb-line">Reserva: <span class="hl">${fmtUsd(reservaB)}</span></div>
     <div class="cb-summary">
@@ -406,21 +413,32 @@ function renderMotorStatus(data) {
     return;
   }
 
-  const motorA = data.motorA || { nombre: 'DCA Estable', capitalAsignado: 0, capitalPct: 0 };
-  const motorB = data.motorB || { nombre: 'Scalping Selectivo', capitalAsignado: 0, capitalPct: 0, disponible: 0, posiciones: [], maxPosiciones: 3, cryptoConfianza: {} };
+  const motorA = data.motorA || { nombre: 'DCA Estable (retirado)', activo: false, capitalAsignado: 0, capitalPct: 0 };
+  const motorB = data.motorB || { nombre: 'Scalping Selectivo', activo: true, capitalAsignado: 0, capitalPct: 0, disponible: 0, posiciones: [], maxPosiciones: 10, cryptoConfianza: {} };
+
+  // Motor A retirado (2026-08-19, "SOLO Motor B", motorA.activo=false): solo
+  // se muestra la línea de Motor A mientras queden posiciones heredadas
+  // cerrando (capitalInvertido > 0 en btc y/o eth); una vez en $0 desaparece
+  // del todo del dashboard.
+  const motorAInvertido = (motorA.btc && motorA.btc.capitalInvertido || 0) + (motorA.eth && motorA.eth.capitalInvertido || 0);
+  const motorALineas = motorA.activo === false && motorAInvertido <= 0
+    ? ''
+    : `<div class="strat-line">${motorA.nombre} — <span class="hl">${motorA.capitalPct}% | ${fmtUsd(motorA.capitalAsignado)}</span></div>
+      ${motorAPairLine('&nbsp;&nbsp;BTC', motorA.btc)}
+      ${motorAPairLine('&nbsp;&nbsp;ETH', motorA.eth)}`;
 
   // Bloque "DISTRIBUCIÓN DE CAPITAL" — pedido explícito (2026-08-17, PROBLEMA 3).
   const distribucion = `
     <div class="strat-card">
       <div class="strat-header"><span>💰 DISTRIBUCIÓN DE CAPITAL</span></div>
-      <div class="strat-line">${motorA.nombre} — <span class="hl">${motorA.capitalPct}% | ${fmtUsd(motorA.capitalAsignado)}</span></div>
-      ${motorAPairLine('&nbsp;&nbsp;BTC', motorA.btc)}
-      ${motorAPairLine('&nbsp;&nbsp;ETH', motorA.eth)}
+      ${motorALineas}
       <div class="strat-line" style="margin-top:8px">${motorB.nombre} — <span class="hl">${motorB.capitalPct}% | ${fmtUsd(motorB.capitalAsignado)}</span></div>
       <div class="strat-line">&nbsp;&nbsp;${motorB.posicionesActivas}/${motorB.maxPosiciones} posiciones activas · disponible ${fmtUsd(motorB.disponible)}</div>
       <div class="strat-line" style="margin-top:8px">Régimen: <span class="hl">${data.regimen || '—'}</span> ${data.regimenMercado ? `(mercado ${data.regimenMercado})` : ''}</div>
       <div class="strat-line">Capital libre: <span class="hl">${fmtUsd(data.capitalLibre)}</span></div>
       ${data.modoDefensivo && data.modoDefensivo.activo ? `<div class="strat-line">🛡️ Modo defensivo activo: tamaño ${Math.round(data.modoDefensivo.multiplicador * 100)}%${data.modoDefensivo.razon ? ` — ${data.modoDefensivo.razon}` : ''}</div>` : ''}
+      ${data.mejorHoraHoy ? `<div class="strat-line" style="margin-top:8px">🟢 Mejor hora hoy: <span class="hl">${String(data.mejorHoraHoy.horaUtc).padStart(2, '0')}h UTC (${data.mejorHoraHoy.pnl >= 0 ? '+' : ''}${fmtUsd(data.mejorHoraHoy.pnl)})</span></div>` : ''}
+      ${data.peorHoraHoy ? `<div class="strat-line">🔴 Peor hora hoy: <span class="hl">${String(data.peorHoraHoy.horaUtc).padStart(2, '0')}h UTC (${data.peorHoraHoy.pnl >= 0 ? '+' : ''}${fmtUsd(data.peorHoraHoy.pnl)})</span></div>` : ''}
     </div>`;
 
   const motorBPosLines = (motorB.posiciones || []).length === 0
@@ -428,11 +446,11 @@ function renderMotorStatus(data) {
     : motorB.posiciones.map((p) => `<div class="strat-line">${p.pair}: <span class="hl">${fmtUsd(p.monto)}</span> @ ${fmtUsd(p.entryPrice)} (confianza ${p.nivelConfianza || '—'}, TP +${p.tpPct}%/SL -${p.slPct}%)</div>`).join('');
 
   const confianzaRows = (data.confianza || []).map((c) => {
-    const pfTxt = c.pf7d === null ? '—' : (c.pf7d >= 999 ? '∞' : c.pf7d.toFixed(2));
+    const pfTxt = c.pf48h === null ? '—' : (c.pf48h >= 999 ? '∞' : c.pf48h.toFixed(2));
     return `
       <div class="conf-row">
         <div class="conf-pair">${c.pair.replace('/USDT', '')}</div>
-        <div class="conf-track"><div class="conf-fill ${confClass(c.nivel)}" style="width:${confFillWidth(c.pf7d)}%"></div></div>
+        <div class="conf-track"><div class="conf-fill ${confClass(c.nivel)}" style="width:${confFillWidth(c.pf48h)}%"></div></div>
         <div class="conf-label">${c.nivel} (PF ${pfTxt})</div>
       </div>`;
   }).join('');
@@ -444,7 +462,7 @@ function renderMotorStatus(data) {
       ${motorBPosLines}
     </div>
     <div class="strat-card">
-      <div class="strat-header"><span>📊 Confianza por crypto (7 días)</span></div>
+      <div class="strat-header"><span>📊 Confianza por crypto (48h)</span></div>
       ${confianzaRows || '<div class="strat-line">Sin datos todavía.</div>'}
     </div>
   `;

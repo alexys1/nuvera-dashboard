@@ -44,6 +44,10 @@ const CACHE_TTL_MS = {
   '/api/market-mood': 60_000,
   '/api/autonomia': 60_000,
   '/api/cooldowns': 60_000,
+  // Endpoints con :id en la ruta (/api/competition/bot/2/trades, etc.) no
+  // matchean acá (la key es la ruta exacta, sin wildcard) — caen al default
+  // de 30s de fetchJson, que ya es razonable para estos.
+  '/api/competition/ranking': 20_000,
 };
 const cache = new Map(); // path -> { data, fetchedAt }
 
@@ -607,12 +611,155 @@ async function loadSistema(force = false) {
   }
 }
 
+// ---------- Competencia de estrategias (2026-08-19, FASE 2/3, pedido
+// explícito) — Bot 2 (Grid BTC/ETH) y Bot 3 (DCA Agresivo), paper trading
+// paralelo con capital PROPIO ($1,000 c/u), separado del bot principal.
+// Consume /api/competition/* (ver src/api/server.js).
+let competenciaSelectedBotId = null;
+let competenciaChart = null;
+let competenciaChartSeries = null;
+
+function medalFor(posicion) {
+  if (posicion === 1) return '🥇';
+  if (posicion === 2) return '🥈';
+  if (posicion === 3) return '🥉';
+  return `${posicion}️⃣`;
+}
+
+function renderCompetenciaRanking(ranking) {
+  const container = $('competenciaRanking');
+  if (!ranking || ranking.length === 0) {
+    container.innerHTML = '<div class="empty-state">Sin bots de competencia todavía.</div>';
+    return;
+  }
+  container.innerHTML = ranking.map((r) => `
+    <div class="ranking-row">
+      <span class="medal">${medalFor(r.posicion)}</span>
+      <span class="nombre">${r.nombre}</span>
+      <span class="capital ${pnlClass(r.pnl)}">${fmtUsd(r.capitalActual)} (${fmtPct(r.pnlPct)})</span>
+    </div>`).join('');
+}
+
+function renderCompetenciaSelector(ranking) {
+  const container = $('competenciaBotSelector');
+  container.innerHTML = ranking.map((r) => `<button class="bot-selector-btn${r.id === competenciaSelectedBotId ? ' active' : ''}" data-bot-id="${r.id}">${r.nombre.replace(/^Bot \d+ — /, '')}</button>`).join('');
+  container.querySelectorAll('.bot-selector-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (parseInt(btn.dataset.botId, 10) === competenciaSelectedBotId) return;
+      competenciaSelectedBotId = parseInt(btn.dataset.botId, 10);
+      container.querySelectorAll('.bot-selector-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      loadCompetenciaDetail(true);
+    });
+  });
+}
+
+function renderCompetenciaDetail(bot) {
+  const container = $('competenciaDetail');
+  if (!bot) {
+    container.innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
+    return;
+  }
+  const pfTxt = bot.profitFactor7d >= 999 ? '∞' : (bot.profitFactor7d ?? '—');
+  const posiciones = bot.posicionesAbiertas || [];
+  container.innerHTML = `
+    <div class="strat-card">
+      <div class="strat-header"><span>${bot.nombre}</span>${bot.activo === false ? '<span>⏸️ Pausado</span>' : ''}</div>
+      <div class="strat-line">Capital: <span class="hl ${pnlClass(bot.pnl)}">${fmtUsd(bot.capitalActual)} (${fmtPct(bot.pnlPct)})</span></div>
+      <div class="strat-line">WR (7 días): <span class="hl">${bot.winrate7d ?? 0}%</span> | PF (7 días): <span class="hl">${pfTxt}</span></div>
+      <div class="strat-line">Trades hoy: <span class="hl">${bot.tradesHoy}</span> | Trades (7 días): <span class="hl">${bot.trades7d}</span></div>
+      <div class="strat-line" style="margin-top:6px">${posiciones.length === 0 ? 'Sin posiciones abiertas.' : `Posiciones abiertas: ${posiciones.map((p) => `${p.pair.replace('/USDT', '')} $${p.sizeUsdt}`).join(', ')}`}</div>
+    </div>`;
+}
+
+function renderCompetenciaTrades(trades) {
+  const container = $('competenciaTradesList');
+  if (!trades || trades.length === 0) {
+    container.innerHTML = '<div class="empty-state">Sin trades todavía.</div>';
+    return;
+  }
+  container.innerHTML = trades.map((t) => {
+    const sym = t.pair.replace('/USDT', '');
+    if (t.outcome === 'open') return `<div class="strat-line">${sym}: abierto @ $${t.entryPrice} ($${t.sizeUsdt})</div>`;
+    return `<div class="strat-line">${sym} <span class="${pnlClass(t.pnl)}">${t.outcome === 'win' ? 'WIN' : 'LOSS'} ${fmtUsd(t.pnl)}</span></div>`;
+  }).join('');
+}
+
+function initCompetenciaChart() {
+  const container = $('competenciaChartContainer');
+  competenciaChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: container.clientHeight,
+    layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { visible: false }, horzLines: { color: '#21262d' } },
+    rightPriceScale: { borderColor: '#30363d' },
+    timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+    handleScroll: false,
+    handleScale: false,
+  });
+  competenciaChartSeries = competenciaChart.addAreaSeries({
+    lineColor: '#00ff88', topColor: 'rgba(0, 255, 136, 0.25)', bottomColor: 'rgba(0, 255, 136, 0)',
+    lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+  });
+  new ResizeObserver(() => { if (competenciaChart) competenciaChart.applyOptions({ width: container.clientWidth }); }).observe(container);
+}
+
+async function loadCompetenciaChart(botId, force = false) {
+  try {
+    const raw = await fetchJson(`/api/competition/bot/${botId}/chart?days=7`, { force });
+    if (!raw || raw.length === 0) {
+      $('competenciaChartContainer').style.display = 'none';
+      $('competenciaChartPlaceholder').style.display = 'block';
+      $('competenciaChartPlaceholder').textContent = 'Todavía no hay historial de capital (sin trades cerrados).';
+      return;
+    }
+    const points = raw.map((p) => ({ time: Math.floor(new Date(p.timestamp).getTime() / 1000), value: p.capital }));
+    $('competenciaChartPlaceholder').style.display = 'none';
+    $('competenciaChartContainer').style.display = 'block';
+    if (!competenciaChart) initCompetenciaChart();
+    competenciaChartSeries.setData(points);
+    competenciaChart.timeScale().fitContent();
+  } catch (err) {
+    $('competenciaChartPlaceholder').style.display = 'block';
+    $('competenciaChartPlaceholder').textContent = 'No se pudo cargar la gráfica.';
+  }
+}
+
+async function loadCompetenciaDetail(force = false) {
+  if (!competenciaSelectedBotId) return;
+  try {
+    const [bot, trades] = await Promise.all([
+      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}`, { force }),
+      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}/trades?limit=10`, { force }),
+    ]);
+    renderCompetenciaDetail(bot);
+    renderCompetenciaTrades(trades);
+    await loadCompetenciaChart(competenciaSelectedBotId, force);
+  } catch (err) {
+    $('competenciaDetail').innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
+  }
+}
+
+async function loadCompetencia(force = false) {
+  try {
+    const ranking = await fetchJson('/api/competition/ranking', { force });
+    $('competenciaSubtitulo').textContent = `${ranking.length} estrategias en paper trading | Capital inicial: $1,000 c/u`;
+    renderCompetenciaRanking(ranking);
+    renderCompetenciaSelector(ranking);
+    if (!competenciaSelectedBotId && ranking.length > 0) competenciaSelectedBotId = ranking[0].id;
+    await loadCompetenciaDetail(force);
+  } catch (err) {
+    $('competenciaSubtitulo').textContent = 'No se pudo cargar la competencia.';
+    console.warn('loadCompetencia falló:', err.message);
+  }
+}
+
 // ---------- Tabs: cambio instantáneo, carga perezosa una sola vez ----------
 const TAB_LOADERS = {
   trades: loadTradesTab,
   estrategias: loadEstrategias,
   analisis: loadAnalisis,
   sistema: loadSistema,
+  competencia: loadCompetencia,
 };
 const tabLoadedOnce = new Set();
 let activeTab = 'trades';

@@ -329,6 +329,30 @@
   .sys-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   .sys-item .val { margin-left: auto; color: var(--text-sec); }
   .subsection-title { font-size: 12px; text-transform: uppercase; color: var(--text-sec); font-weight: 700; margin: 18px 0 8px; }
+
+  /* ---------- Competencia (2026-08-19, FASE 3, sistema de competencia de
+  estrategias) ---------- */
+  /* Mismo estilo visual que .subtab-btn, pero clase propia: el selector
+  global de subtabs (app.js, .subtab-btn -> switchSubtab) es específico del
+  tab Trades — reusar la misma clase acá activaría ese handler por error. */
+  .bot-selector-btn {
+    min-height: 38px;
+    padding: 0 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-sec);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bot-selector-btn.active { background: var(--active-bg); color: var(--green); border-color: var(--green); }
+  .ranking-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 0; }
+  .ranking-row .medal { width: 22px; text-align: center; flex-shrink: 0; }
+  .ranking-row .nombre { flex: 1; color: var(--text); }
+  .ranking-row .capital { color: var(--text-sec); font-weight: 600; }
+  #competenciaChartContainer { width: 100%; height: 180px; }
   .err-item { font-size: 12px; padding: 8px; border-left: 2px solid var(--red); background: var(--card); border-radius: 0 8px 8px 0; margin-bottom: 6px; }
 
   /* ---------- Skeleton ---------- */
@@ -450,6 +474,7 @@
       <button class="tab-btn" data-tab="estrategias" role="tab">Estrategias</button>
       <button class="tab-btn" data-tab="analisis" role="tab">Análisis</button>
       <button class="tab-btn" data-tab="sistema" role="tab">Sistema</button>
+      <button class="tab-btn" data-tab="competencia" role="tab">Competencia</button>
     </div>
 
     <div class="tab-panel active" id="tab-trades">
@@ -494,6 +519,34 @@
 
     <div class="tab-panel" id="tab-sistema">
       <div id="sistemaContent"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+
+    <!-- Competencia de estrategias (2026-08-19, FASE 2/3, pedido explícito):
+    Bot 2 (Grid BTC/ETH) y Bot 3 (DCA Agresivo) en paper trading paralelo,
+    capital propio de $1,000 c/u — ver src/api/server.js /api/competition/*
+    y src/strategies/competitionGrid.js/competitionDca.js del bot. -->
+    <div class="tab-panel" id="tab-competencia">
+      <div class="strat-card">
+        <div class="strat-header"><span>🏆 COMPETENCIA DE ESTRATEGIAS</span></div>
+        <div class="strat-line" id="competenciaSubtitulo">Cargando…</div>
+      </div>
+
+      <div class="subtabs-nav" id="competenciaBotSelector"></div>
+
+      <div id="competenciaDetail"><div class="empty-state skeleton">Cargando…</div></div>
+
+      <div id="competenciaChartContainer" style="display:none;"></div>
+      <div class="empty-state" id="competenciaChartPlaceholder" style="display:none;"></div>
+
+      <div class="strat-card">
+        <div class="strat-header"><span>Trades recientes</span></div>
+        <div class="row-list" id="competenciaTradesList"><div class="empty-state">Sin datos.</div></div>
+      </div>
+
+      <div class="strat-card">
+        <div class="strat-header"><span>RANKING ACTUAL</span></div>
+        <div id="competenciaRanking"><div class="empty-state">Sin datos.</div></div>
+      </div>
     </div>
   </section>
 

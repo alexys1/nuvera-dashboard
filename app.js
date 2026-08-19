@@ -1,13 +1,12 @@
-// Dashboard Nuvera Bot — rediseño completo (2026-08-16).
-// Vanilla JS, sin frameworks, sin build step (se sirve tal cual desde GitHub
-// Pages). Principios: rendimiento primero (datos críticos en <1s, gráfica
-// después, caché por tipo de dato, máximo 3 peticiones al abrir la página) y
-// móvil primero (sin hover, sin scroll horizontal, toques grandes).
+// Dashboard Nuvera Bot — rediseño "Institutional" (2026-08-19): sidebar fijo
+// + vista individual por bot/estrategia (Overview, Motor B, Motor A DCA,
+// Bot 2 Grid, Bot 3 DCA, Bot 4 DCA, Settings). Vanilla JS, sin frameworks,
+// sin build step (se sirve tal cual desde GitHub Pages). Reemplaza por
+// completo al dashboard de tabs anterior — mismo backend (src/api/server.js),
+// más 5 endpoints nuevos de solo lectura (/api/overview, /api/bot/motorb/
+// stats, /api/bot/grid/levels, /api/bot/dca/:id/path, /api/bot/motora/stats).
 
-// ---------- Config / API base ----------
-// Mismo mecanismo que el dashboard anterior (ver README.md): ?api=URL en la
-// query string lo guarda en localStorage, así que no hace falta repetirlo en
-// cada visita desde el mismo navegador.
+// ---------- Config / API base (mismo mecanismo que el dashboard anterior) ----------
 const DEFAULT_API_BASE = 'https://shorter-sprung-process.ngrok-free.dev';
 function resolveApiBase() {
   const url = new URL(window.location.href);
@@ -18,852 +17,113 @@ function resolveApiBase() {
   }
   return localStorage.getItem('nuvera_api') || DEFAULT_API_BASE;
 }
-const API_BASE = resolveApiBase();
+let API_BASE = resolveApiBase();
 
 const $ = (id) => document.getElementById(id);
-const fmtUsd = (n) => (n === null || n === undefined ? '—' : `$${n.toFixed(2)}`);
-const fmtPct = (n, digits = 1) => (n === null || n === undefined ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(digits)}%`);
+const fmtUsd = (n) => (n === null || n === undefined ? '—' : `$${Number(n).toFixed(2)}`);
+const fmtUsdPrecise = (n, d = 2) => (n === null || n === undefined ? '—' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`);
+const fmtPct = (n, digits = 1) => (n === null || n === undefined ? '—' : `${n >= 0 ? '+' : ''}${Number(n).toFixed(digits)}%`);
 const pnlClass = (n) => (n === null || n === undefined ? '' : (n >= 0 ? 'pnl-pos' : 'pnl-neg'));
+const esc = (s) => String(s ?? '').replace(/</g, '&lt;');
 
 // ---------- Caché en memoria, TTL por tipo de dato ----------
-// Un fetch dentro del TTL reutiliza lo que ya está en memoria en vez de
-// pegarle a la API de nuevo — esto es lo que hace que cambiar de tab o volver
-// a una sección ya vista se sienta instantáneo. El polling programado (ver
-// startPolling) es más espaciado que el TTL a propósito: cuando el timer
-// dispara, el caché ya venció y siempre trae datos frescos.
 const CACHE_TTL_MS = {
-  '/api/dashboard-summary': 10_000,
-  '/api/positions': 30_000,
-  '/api/trades-history': 30_000,
-  '/api/strategies-today': 60_000,
+  '/api/overview': 15_000,
   '/api/motor-status': 30_000,
-  '/api/diary/today': 30 * 60_000,
-  '/api/health': 60_000,
-  '/api/system': 60_000,
-  '/api/regime': 60_000,
-  '/api/market-mood': 60_000,
-  '/api/autonomia': 60_000,
-  '/api/cooldowns': 60_000,
-  // Endpoints con :id en la ruta (/api/competition/bot/2/trades, etc.) no
-  // matchean acá (la key es la ruta exacta, sin wildcard) — caen al default
-  // de 30s de fetchJson, que ya es razonable para estos.
-  '/api/competition/ranking': 20_000,
+  '/api/bot/motorb/stats': 30_000,
+  '/api/bot/motora/stats': 30_000,
+  '/api/bot/grid/levels': 20_000,
+  '/api/competition/ranking': 60_000,
 };
-const cache = new Map(); // path -> { data, fetchedAt }
+const cache = new Map();
 
 async function fetchJson(path, { force = false } = {}) {
-  // /api/trades-history?filter=wins&page=2 etc: el TTL se busca por la parte
-  // antes del '?' (una sola entrada en CACHE_TTL_MS para todas las
-  // combinaciones de filtro/página), pero cada combinación se cachea aparte
-  // (la query string completa es la key del Map) — cambiar de filtro o de
-  // página siempre pide datos frescos la primera vez, no reusa el filtro anterior.
-  const ttl = CACHE_TTL_MS[path.split('?')[0]] ?? 30_000;
+  const ttl = CACHE_TTL_MS[path.split('?')[0]] ?? 20_000;
   const cached = cache.get(path);
   if (!force && cached && Date.now() - cached.fetchedAt < ttl) return cached.data;
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'ngrok-skip-browser-warning': 'true' },
-  });
+  const res = await fetch(`${API_BASE}${path}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   const data = await res.json();
   cache.set(path, { data, fetchedAt: Date.now() });
   return data;
 }
 
-// ---------- Header + 3 cards (un solo endpoint) ----------
-let lastSummaryFetchAt = null;
-
-function renderSummary(s) {
-  $('statusText').textContent = s.estado === 'operando' ? 'OPERANDO' : 'PAUSADO';
-  $('statusDot').className = 'dot ' + (s.estado === 'operando' ? 'ok' : 'bad');
-  $('modePill').textContent = s.modo === 'live' ? '🔴 LIVE' : '📄 PAPER';
-
-  $('capitalValue').textContent = fmtUsd(s.capital);
-  const pnlEl = $('pnlValue');
-  pnlEl.textContent = `${fmtUsd(s.pnlHoy)} (${fmtPct(s.pnlPct)})`;
-  pnlEl.className = 'metric-value metric-pnl ' + pnlClass(s.pnlHoy);
-
-  $('fearGreedText').textContent = s.fearGreed !== null && s.fearGreed !== undefined
-    ? `Fear & Greed: ${s.fearGreed} ${s.fearGreedLabel || ''}`
-    : 'Fear & Greed: —';
-
-  // Racha actual (header): solo se muestra si hay 2+ seguidos — una racha de
-  // 1 no dice nada todavía, no vale la pena ocupar espacio en el header.
-  const rachaEl = $('rachaPill');
-  if (s.rachaActual >= 2 && s.rachaTipo) {
-    rachaEl.style.display = 'inline-flex';
-    rachaEl.className = 'pill racha-' + s.rachaTipo;
-    rachaEl.textContent = s.rachaTipo === 'wins' ? `🔥 ${s.rachaActual} wins seguidos` : `⚠️ ${s.rachaActual} losses seguidos`;
-  } else {
-    rachaEl.style.display = 'none';
-  }
-
-  // Card HOY
-  const hoyPnlEl = $('cardHoyPnl');
-  hoyPnlEl.textContent = fmtUsd(s.pnlHoy);
-  hoyPnlEl.className = 'cell-value ' + pnlClass(s.pnlHoy);
-  $('cardHoyTrades').textContent = s.tradesHoy ?? '—';
-  const pfBadge = s.pfHoy >= 1.3 ? '🌟' : s.pfHoy >= 1.0 ? '✅' : '⚠️';
-  $('cardHoyWrPf').textContent = `${s.wrHoy ?? '—'}% | ${s.pfHoy?.toFixed(2) ?? '—'} ${pfBadge}`;
-
-  // Card CAPITAL (el desglose por motor se pinta aparte, ver
-  // renderCapitalBreakdown — depende de /api/motor-status, no de este endpoint).
-  $('cardCapitalTotal').textContent = fmtUsd(s.capital);
-
-  // Card INTELIGENCIA
-  $('cardIaOllama').textContent = s.ollamaOk ? '✅ en RAM' : '⚠️ no cargado';
-  $('cardIaXgb').textContent = s.xgboostAccuracy !== null && s.xgboostAccuracy !== undefined
-    ? `${s.xgboostAccuracy.toFixed(1)}% acc`
-    : 'sin modelo';
-  const learningsTrendTxt = s.aprendizajesAyer !== null && s.aprendizajesAyer !== undefined
-    ? ` (${s.aprendizajesHoy >= s.aprendizajesAyer ? '↑' : '↓'} vs ${s.aprendizajesAyer} ayer)`
-    : '';
-  $('cardIaLearnings').textContent = `${s.aprendizajesHoy ?? '—'}${learningsTrendTxt}`;
-
-  lastSummaryFetchAt = Date.now();
-}
-
-// Desglose de capital por motor (2026-08-17, pedido explícito: "el capital
-// no está 'libre', está reservado para DCA" — antes esta card mostraba "En
-// trades $X / Libre $Y", que sugería que el resto del capital no tenía
-// destino). Reutiliza /api/motor-status (ya se consumía en el tab
-// Estrategias) — nada de esto toca el backend, es puramente visual.
-function reservaMotorAPair(p, capitalPorPair) {
-  if (!p) return 0;
-  return Math.max(0, capitalPorPair - (p.capitalInvertido || 0));
-}
-
-function renderCapitalBreakdown(motorStatus) {
-  const container = $('capitalBreakdown');
-  if (!motorStatus) {
-    container.innerHTML = '<div class="card-row"><span class="label">No se pudo cargar</span></div>';
-    return;
-  }
-
-  const motorA = motorStatus.motorA || {};
-  const motorB = motorStatus.motorB || {};
-  // Reserva por par (2026-08-18, corrección BUG 3, pedido explícito): antes
-  // dividía capitalAsignado de Motor A / 2 a mano, asumiendo siempre 2
-  // pares con partes iguales — ya estaba mal con el split real 40/60
-  // BTC/ETH, y roto al agregar BNB (35/45/20, no un tercio parejo). Ahora
-  // /api/motor-status trae el capitalAsignado REAL de cada par (mismo
-  // cálculo que usa smartDCA.js para decidir cuánto puede comprar), así que
-  // no hace falta estimarlo acá — y el bloque queda genérico para
-  // cualquier cantidad de pares en vez de asumir 2.
-  const paresMotorA = [
-    ['BTC', motorA.btc],
-    ['ETH', motorA.eth],
-    ['BNB', motorA.bnb],
-  ].filter(([, p]) => p);
-  const reservasA = paresMotorA.map(([nombre, p]) => [nombre, reservaMotorAPair(p, p.capitalAsignado || 0)]);
-  const activoA = paresMotorA.reduce((s, [, p]) => s + (p.capitalInvertido || 0), 0);
-  const reservaATotal = reservasA.reduce((s, [, r]) => s + r, 0);
-
-  const posiciones = motorB.posiciones || [];
-  const maxPos = motorB.maxPosiciones || 3;
-  const slotsLibres = Math.max(0, maxPos - posiciones.length);
-  const activoB = posiciones.reduce((s, p) => s + p.monto, 0);
-  const reservaB = motorB.disponible || 0;
-
-  const totalActivo = activoA + activoB;
-  const totalReservado = reservaATotal + reservaB;
-
-  const motorALines = paresMotorA.map(([nombre, p], i) =>
-    `<div class="cb-line">${nombre}: <span class="hl">${fmtUsd(p.capitalInvertido || 0)}</span> activo | Reserva: <span class="hl">${fmtUsd(reservasA[i][1])}</span> para próx. compras</div>`
-  ).join('');
-
-  const motorBLines = [
-    ...posiciones.map((p) => `<div class="cb-line">${p.pair.replace('/USDT', '')}: <span class="hl">${fmtUsd(p.monto)}</span> activo</div>`),
-    ...Array.from({ length: slotsLibres }, (_, i) => `<div class="cb-line free">Slot ${posiciones.length + i + 1}: libre (buscando señal)</div>`),
-  ].join('');
-
-  // Motor A retirado (2026-08-19, motorA.activo=false en /api/motor-status):
-  // el bot ahora corre SOLO Motor B (pedido explícito). El bloque de Motor A
-  // solo se muestra mientras queden posiciones heredadas cerrando solas
-  // (activoA > 0) — una vez que cierran, desaparece del dashboard.
-  const motorABlock = motorA.activo === false && activoA <= 0 ? '' : `
-    <div class="cb-motor-title">🔵 Motor A — DCA ${paresMotorA.map(([n]) => n).join('/')}${motorA.activo === false ? ' (retirado, cerrando)' : ''}</div>
-    ${motorALines}`;
-
-  container.innerHTML = `
-    ${motorABlock}
-    <div class="cb-motor-title">🟡 Motor B — Scalping (único motor activo)</div>
-    ${motorBLines}
-    <div class="cb-line">Reserva: <span class="hl">${fmtUsd(reservaB)}</span></div>
-    <div class="cb-summary">
-      <div class="ok">✅ Todo el capital tiene destino asignado</div>
-      <div class="cb-line">${fmtUsd(totalActivo)} activo | ${fmtUsd(totalReservado)} reservado para oportunidades</div>
-    </div>
-  `;
-}
-
-async function loadSummary(force = false) {
-  try {
-    const [summary, motorStatus] = await Promise.all([
-      fetchJson('/api/dashboard-summary', { force }),
-      fetchJson('/api/motor-status', { force }).catch(() => null),
-    ]);
-    renderSummary(summary);
-    renderCapitalBreakdown(motorStatus);
-  } catch (err) {
-    console.warn('dashboard-summary falló:', err.message);
-  }
-}
-
-// "Última act: hace Ns" — se actualiza cada segundo sin pegarle a la red,
-// solo recalcula contra el timestamp del último fetch exitoso.
-function tickLastUpdate() {
-  if (!lastSummaryFetchAt) return;
-  const secs = Math.round((Date.now() - lastSummaryFetchAt) / 1000);
-  $('lastUpdateText').textContent = `Última act: hace ${secs}s`;
-}
-
-// ---------- TAB TRADES — sub-tab ABIERTOS ----------
-const MAX_POSICIONES_VISIBLES = 10;
-
-function renderPosiciones(list) {
-  const container = $('posicionesList');
-  const verMas = $('posicionesVerMas');
-  if (!list || list.length === 0) {
-    container.innerHTML = '<div class="empty-state">Sin posiciones abiertas ahora mismo.</div>';
-    verMas.style.display = 'none';
-    return;
-  }
-  const visibles = list.slice(0, MAX_POSICIONES_VISIBLES);
-  container.innerHTML = visibles.map((p) => `
-    <div class="pos-row">
-      <div class="pair">${p.par}</div>
-      <div><div class="cell-label">Invertido</div><div class="cell-value">${fmtUsd(p.invertido)}</div></div>
-      <div><div class="cell-label">PnL actual</div><div class="cell-value ${pnlClass(p.pnlActual)}">${fmtUsd(p.pnlActual)} ${p.pnlActual >= 0 ? '✅' : '🔴'}</div></div>
-      <div><div class="cell-label">Tiempo</div><div class="cell-value">${p.tiempoAbierto || '—'}</div></div>
-    </div>
-  `).join('');
-
-  if (list.length > MAX_POSICIONES_VISIBLES) {
-    verMas.style.display = 'block';
-    verMas.textContent = `+${list.length - MAX_POSICIONES_VISIBLES} posiciones más abiertas`;
-  } else {
-    verMas.style.display = 'none';
-  }
-}
-
-async function loadPosiciones(force = false) {
-  try {
-    const data = await fetchJson('/api/positions', { force });
-    renderPosiciones(data);
-  } catch (err) {
-    $('posicionesList').innerHTML = '<div class="empty-state">No se pudo cargar (reintentando…)</div>';
-  }
-}
-
-// ---------- TAB TRADES — sub-tab HISTORIAL ----------
-// Estado de filtro/página en memoria (no en la URL, no hace falta persistir
-// entre visitas) — cambiar de filtro siempre vuelve a página 1.
-const historialState = { filter: 'all', page: 1 };
-
-function renderHistorial(data) {
-  const container = $('historialList');
-  const pagination = $('historialPagination');
-  const trades = (data && data.trades) || [];
-
-  if (trades.length === 0) {
-    container.innerHTML = '<div class="empty-state">Sin trades cerrados para este filtro.</div>';
-    pagination.style.display = 'none';
-    return;
-  }
-
-  container.innerHTML = trades.map((t) => {
-    const isWin = t.outcome === 'win';
-    const hora = (t.fecha || '').slice(11, 16) + ' UTC';
-    return `
-      <div class="hist-row ${isWin ? 'win' : 'loss'}">
-        <div class="hist-top">
-          <div class="hist-par">${t.par}</div>
-          <div class="hist-resultado ${isWin ? 'win' : 'loss'}">${isWin ? 'WIN ✅' : 'LOSS 🔴'}</div>
-        </div>
-        <div class="hist-cell hist-extra"><div class="cell-label">Estrategia</div><div class="cell-value">${t.estrategia || '—'}</div></div>
-        <div class="hist-cell hist-extra"><div class="cell-label">Nivel</div><div class="cell-value">${t.nivel ?? '—'}</div></div>
-        <div class="hist-cell hist-extra"><div class="cell-label">Entrada</div><div class="cell-value">${t.entrada ?? '—'}</div></div>
-        <div class="hist-cell hist-extra"><div class="cell-label">Salida</div><div class="cell-value">${t.salida ?? '—'}</div></div>
-        <div class="hist-cell hist-pnl"><div class="cell-label">PnL</div><div class="cell-value ${pnlClass(t.pnl)}">${fmtUsd(t.pnl)}</div></div>
-        <div class="hist-cell"><div class="cell-label">Duración</div><div class="cell-value">${t.duracion || '—'}</div></div>
-        <div class="hist-cell"><div class="cell-label">Hora</div><div class="cell-value">${hora}</div></div>
-      </div>
-    `;
-  }).join('');
-
-  pagination.style.display = 'flex';
-  $('paginationInfo').textContent = `Página ${data.page} de ${data.totalPages}`;
-  $('paginationPrev').disabled = data.page <= 1;
-  $('paginationNext').disabled = data.page >= data.totalPages;
-}
-
-async function loadHistorial(force = false) {
-  try {
-    const path = `/api/trades-history?limit=20&filter=${historialState.filter}&page=${historialState.page}`;
-    const data = await fetchJson(path, { force });
-    renderHistorial(data);
-  } catch (err) {
-    $('historialList').innerHTML = '<div class="empty-state">No se pudo cargar el historial (reintentando…)</div>';
-  }
-}
-
-document.querySelectorAll('.filter-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.filter === historialState.filter) return;
-    document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    historialState.filter = btn.dataset.filter;
-    historialState.page = 1;
-    loadHistorial(true);
-  });
-});
-$('paginationPrev').addEventListener('click', () => {
-  if (historialState.page <= 1) return;
-  historialState.page -= 1;
-  loadHistorial(true);
-});
-$('paginationNext').addEventListener('click', () => {
-  historialState.page += 1;
-  loadHistorial(true);
-});
-
-// ---------- TAB TRADES — sub-tabs (Abiertos / Historial) ----------
-const SUBTAB_LOADERS = { abiertos: loadPosiciones, historial: loadHistorial };
-const subtabLoadedOnce = new Set();
-let activeSubtab = 'abiertos';
-
-function switchSubtab(subtab) {
-  if (subtab === activeSubtab) return;
-  if (!SUBTAB_LOADERS[subtab]) {
-    console.warn('Sub-tab desconocida (sin loader registrado):', subtab);
-    return;
-  }
-  activeSubtab = subtab;
-  document.querySelectorAll('.subtab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.subtab === subtab));
-  document.querySelectorAll('.subtab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `subtab-${subtab}`));
-  subtabLoadedOnce.add(subtab);
-  SUBTAB_LOADERS[subtab]();
-}
-
-document.querySelectorAll('.subtab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => switchSubtab(btn.dataset.subtab));
-});
-
-// Loader único para la tab "trades" (lo que usa el orquestador de tabs de
-// más abajo): carga/refresca solo la sub-tab activa ahora mismo.
-function loadTradesTab(force = false) {
-  subtabLoadedOnce.add(activeSubtab);
-  return SUBTAB_LOADERS[activeSubtab](force);
-}
-
-// ---------- TAB 2: Estrategias ----------
-function renderEstrategias(list) {
-  const container = $('estrategiasList');
-  if (!list || list.length === 0) {
-    container.innerHTML = '<div class="empty-state">Sin datos de estrategias todavía.</div>';
-    return;
-  }
-  const trendIcon = { up: '↗️', down: '↘️', same: '→' };
-  const trendClass = { up: 'trend-up', down: 'trend-down', same: 'trend-same' };
-
-  container.innerHTML = list.map((s) => {
-    const pfBadge = s.pfHoy >= 2.0 ? '🌟' : s.pfHoy >= 1.0 ? '✅' : (s.tradesHoy > 0 ? '⚠️' : '');
-    const slots = s.slotsTotal !== null ? `${s.slotsOcupados}/${s.slotsTotal} ${s.slotsLabel || 'slots ocupados'}` : `${s.slotsOcupados} posiciones`;
-    const mejorParTxt = s.mejorPar ? `Mejor par: <span class="hl">${s.mejorPar.pair}</span> (${fmtUsd(s.mejorPar.pnl)})` : '';
-    return `
-      <div class="strat-card">
-        <div class="strat-header">
-          <span>${s.emoji} ${s.nombre}</span>
-          <span class="${trendClass[s.pfTrend] || 'trend-same'}">${trendIcon[s.pfTrend] || '→'}</span>
-        </div>
-        <div class="strat-line">Trades hoy: <span class="hl">${s.tradesHoy}</span> | WR: <span class="hl">${s.wrHoy}%</span> | PF: <span class="hl">${s.pfHoy.toFixed(2)}</span> <span class="badge">${pfBadge}</span></div>
-        <div class="strat-line">Capital: <span class="hl">${fmtUsd(s.capital)}</span> | ${slots}</div>
-        ${mejorParTxt ? `<div class="strat-line">${mejorParTxt}</div>` : ''}
-      </div>
-    `;
-  }).join('');
-}
-
-// Barras de confianza + detalle de ciclo (2026-08-16, mejoras finales,
-// pedido explícito CAMBIO 5) — consume GET /api/motor-status, que no existía
-// cuando se armó el tab Estrategias original. Ancho de la barra: PF
-// normalizado (PF=2.0 o más -> 100%, PF=0 -> apenas visible) — no es un %
-// real, es una escala visual para comparar pares entre sí de un vistazo.
-function confFillWidth(pf) {
-  if (pf === null || pf === undefined) return 8;
-  return Math.min(100, Math.max(8, (Math.min(pf, 2) / 2) * 100));
-}
-function confClass(nivel) {
-  return { ALTA: 'alta', MEDIA: 'media', BAJA: 'baja', NUEVO: 'nuevo' }[nivel] || 'nuevo';
-}
-
-// Detalle de un par de Motor A (btc/eth) — shape pedido explícito
-// (2026-08-17, PROBLEMA 3): { cicloActual, compras, promedio, esperando }.
-// BNB fue 3er par entre el 2026-08-17 y el 2026-08-18 (revertido, pedido
-// explícito CAMBIO 1) — motorA.bnb ya no viene en la respuesta.
-function motorAPairLine(nombre, p) {
-  if (!p) return `<div class="strat-line">${nombre}: <span class="hl">sin datos</span></div>`;
-  const detalle = p.esperando
-    ? 'sin ciclo activo, esperando caída'
-    : `ciclo ${p.cicloActual}/${p.maxCompras} activo · promedio ${fmtUsd(p.promedio)} · invertido ${fmtUsd(p.capitalInvertido)}${p.tpObjetivoPct !== null ? ` · TP +${p.tpObjetivoPct}%` : ''}`;
-  return `<div class="strat-line">${nombre}: <span class="hl">${detalle}</span></div>`;
-}
-
-function renderMotorStatus(data) {
-  const container = $('motorStatusDetail');
-  if (!data) {
-    container.innerHTML = '';
-    return;
-  }
-
-  const motorA = data.motorA || { nombre: 'DCA Estable (retirado)', activo: false, capitalAsignado: 0, capitalPct: 0 };
-  const motorB = data.motorB || { nombre: 'Scalping Selectivo', activo: true, capitalAsignado: 0, capitalPct: 0, disponible: 0, posiciones: [], maxPosiciones: 10, cryptoConfianza: {} };
-
-  // Motor A retirado (2026-08-19, "SOLO Motor B", motorA.activo=false): solo
-  // se muestra la línea de Motor A mientras queden posiciones heredadas
-  // cerrando (capitalInvertido > 0 en btc y/o eth); una vez en $0 desaparece
-  // del todo del dashboard.
-  const motorAInvertido = (motorA.btc && motorA.btc.capitalInvertido || 0) + (motorA.eth && motorA.eth.capitalInvertido || 0);
-  const motorALineas = motorA.activo === false && motorAInvertido <= 0
-    ? ''
-    : `<div class="strat-line">${motorA.nombre} — <span class="hl">${motorA.capitalPct}% | ${fmtUsd(motorA.capitalAsignado)}</span></div>
-      ${motorAPairLine('&nbsp;&nbsp;BTC', motorA.btc)}
-      ${motorAPairLine('&nbsp;&nbsp;ETH', motorA.eth)}`;
-
-  // Bloque "DISTRIBUCIÓN DE CAPITAL" — pedido explícito (2026-08-17, PROBLEMA 3).
-  const distribucion = `
-    <div class="strat-card">
-      <div class="strat-header"><span>💰 DISTRIBUCIÓN DE CAPITAL</span></div>
-      ${motorALineas}
-      <div class="strat-line" style="margin-top:8px">${motorB.nombre} — <span class="hl">${motorB.capitalPct}% | ${fmtUsd(motorB.capitalAsignado)}</span></div>
-      <div class="strat-line">&nbsp;&nbsp;${motorB.posicionesActivas}/${motorB.maxPosiciones} posiciones activas · disponible ${fmtUsd(motorB.disponible)}</div>
-      <div class="strat-line" style="margin-top:8px">Régimen: <span class="hl">${data.regimen || '—'}</span> ${data.regimenMercado ? `(mercado ${data.regimenMercado})` : ''}</div>
-      <div class="strat-line">Capital libre: <span class="hl">${fmtUsd(data.capitalLibre)}</span></div>
-      ${data.modoDefensivo && data.modoDefensivo.activo ? `<div class="strat-line">🛡️ Modo defensivo activo: tamaño ${Math.round(data.modoDefensivo.multiplicador * 100)}%${data.modoDefensivo.razon ? ` — ${data.modoDefensivo.razon}` : ''}</div>` : ''}
-      ${data.mejorHoraHoy ? `<div class="strat-line" style="margin-top:8px">🟢 Mejor hora hoy: <span class="hl">${String(data.mejorHoraHoy.horaUtc).padStart(2, '0')}h UTC (${data.mejorHoraHoy.pnl >= 0 ? '+' : ''}${fmtUsd(data.mejorHoraHoy.pnl)})</span></div>` : ''}
-      ${data.peorHoraHoy ? `<div class="strat-line">🔴 Peor hora hoy: <span class="hl">${String(data.peorHoraHoy.horaUtc).padStart(2, '0')}h UTC (${data.peorHoraHoy.pnl >= 0 ? '+' : ''}${fmtUsd(data.peorHoraHoy.pnl)})</span></div>` : ''}
-    </div>`;
-
-  const motorBPosLines = (motorB.posiciones || []).length === 0
-    ? '<div class="strat-line">Sin posiciones activas.</div>'
-    : motorB.posiciones.map((p) => `<div class="strat-line">${p.pair}: <span class="hl">${fmtUsd(p.monto)}</span> @ ${fmtUsd(p.entryPrice)} (confianza ${p.nivelConfianza || '—'}, TP +${p.tpPct}%/SL -${p.slPct}%)</div>`).join('');
-
-  const confianzaRows = (data.confianza || []).map((c) => {
-    const pfTxt = c.pf48h === null ? '—' : (c.pf48h >= 999 ? '∞' : c.pf48h.toFixed(2));
-    return `
-      <div class="conf-row">
-        <div class="conf-pair">${c.pair.replace('/USDT', '')}</div>
-        <div class="conf-track"><div class="conf-fill ${confClass(c.nivel)}" style="width:${confFillWidth(c.pf48h)}%"></div></div>
-        <div class="conf-label">${c.nivel} (PF ${pfTxt})</div>
-      </div>`;
-  }).join('');
-
-  container.innerHTML = `
-    ${distribucion}
-    <div class="strat-card">
-      <div class="strat-header"><span>🎯 Motor B — posiciones abiertas</span></div>
-      ${motorBPosLines}
-    </div>
-    <div class="strat-card">
-      <div class="strat-header"><span>📊 Confianza por crypto (48h)</span></div>
-      ${confianzaRows || '<div class="strat-line">Sin datos todavía.</div>'}
-    </div>
-  `;
-}
-
-async function loadEstrategias(force = false) {
-  try {
-    const [data, motorStatus] = await Promise.all([
-      fetchJson('/api/strategies-today', { force }),
-      fetchJson('/api/motor-status', { force }).catch(() => null),
-    ]);
-    renderEstrategias(data);
-    renderMotorStatus(motorStatus);
-  } catch (err) {
-    $('estrategiasList').innerHTML = '<div class="empty-state">No se pudo cargar (reintentando…)</div>';
-  }
-}
-
-// ---------- TAB 3: Análisis Nuvera Research ----------
-function renderAnalisis(d) {
-  const container = $('analisisContent');
-  if (!d || !d.disponible) {
-    container.innerHTML = '<div class="empty-state">Todavía sin análisis publicado hoy.</div>';
-    return;
-  }
-  const stats = d.datosMercado || {};
-  const chips = ['BTC', 'ETH', 'SOL'].filter((sym) => stats[sym] !== undefined).map((sym) => {
-    const val = stats[sym];
-    const num = typeof val === 'number' ? val : parseFloat(val);
-    const cls = Number.isFinite(num) ? pnlClass(num) : '';
-    return `<div class="market-chip"><div class="sym">${sym}</div><div class="val ${cls}">${Number.isFinite(num) ? fmtPct(num) : val}</div></div>`;
-  }).join('');
-
-  container.innerHTML = `
-    <div class="diary-grid">
-      <div class="diary-main">
-        <div class="diary-title">${d.titular || 'Análisis Cripto Diario'}</div>
-        <div class="diary-body">${(d.analisis || '').replace(/</g, '&lt;')}</div>
-        <div class="diary-meta">Nuvera Research · ${d.creadoEn || ''}</div>
-      </div>
-      <div class="diary-side">
-        ${chips ? `<div class="market-grid">${chips}</div>` : ''}
-      </div>
-    </div>
-  `;
-}
-
-async function loadAnalisis(force = false) {
-  try {
-    const data = await fetchJson('/api/diary/today', { force });
-    renderAnalisis(data);
-  } catch (err) {
-    $('analisisContent').innerHTML = '<div class="empty-state">No se pudo cargar el análisis de hoy.</div>';
-  }
-}
-
-// ---------- TAB 4: Sistema ----------
-function fmtUptime(ms) {
-  if (!ms) return '—';
-  const totalMin = Math.round(ms / 60000);
-  if (totalMin < 60) return `${totalMin}min`;
-  const days = Math.floor(totalMin / 1440);
-  const hours = Math.floor((totalMin % 1440) / 60);
-  return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
-}
-
-function renderSistema([health, system, regime, mood, autonomia, cooldowns, insights]) {
-  const container = $('sistemaContent');
-  const errores = health.errores || {};
-  const erroresHtml = errores.total24h === 0
-    ? '<div class="empty-state">✅ Sin errores en las últimas 24h</div>'
-    : (errores.recientes || []).slice(0, 8).map((e) => `
-        <div class="err-item">[${e.fecha || ''}] ${e.tipo}${e.estrategia ? ` (${e.estrategia})` : ''}: ${e.descripcion || ''}</div>
-      `).join('');
-
-  const regimenHtml = regime && regime.disponible
-    ? `${regime.emoji || '➡️'} ${regime.label || regime.regimen} | BTC 7d: ${fmtPct(regime.btc7d)}`
-    : 'Sin datos de régimen todavía.';
-
-  const moodHtml = mood && mood.mood
-    ? `${mood.mood === 'favorable' ? '🟢' : mood.mood === 'esperar' ? '🟡' : '⚪'} ${mood.mood} — ${mood.razon || 'sin detalle'}`
-    : 'Sin lectura de mercado todavía.';
-
-  const restricciones = (autonomia && autonomia.restricciones) || [];
-  const autonomiaHtml = restricciones.length === 0
-    ? 'Sin restricciones propias activas.'
-    : `${restricciones.length} restricción(es) activa(s): ${restricciones.slice(0, 5).map((r) => r.pair || 'horario').join(', ')}`;
-
-  const cooldownList = (cooldowns && cooldowns.pares) || [];
-  const cooldownsHtml = cooldownList.length === 0
-    ? 'Sin cooldowns activos.'
-    : cooldownList.slice(0, 6).map((c) => `${c.pair} (libre en ${c.minutosRestantes}min)`).join(' · ');
-
-  const insightsHtml = insights && insights.disponible
-    ? `<div class="strat-line">"${insights.analisis}"</div>
-       <div class="strat-line" style="margin-top:6px; opacity:0.75;">${insights.fecha || ''}${insights.aplicado ? ' · ✅ sugerencias aplicadas' : ''}</div>`
-    : '<div class="empty-state">Todavía sin análisis estratégico (corre cada hora en punto).</div>';
-
-  container.innerHTML = `
-    <div class="sys-list">
-      <div class="sys-item"><span class="dot ok"></span> Bot: OPERANDO <span class="val">uptime ${fmtUptime(system.botUptimeMs)}</span></div>
-      <div class="sys-item"><span class="dot ${health.postgresql?.ok ? 'ok' : 'bad'}"></span> DB <span class="val">${health.postgresql?.tradesGuardados ?? '—'} trades</span></div>
-      <div class="sys-item"><span class="dot ${health.ollama?.ok ? 'ok' : 'bad'}"></span> Ollama <span class="val">${health.ollama?.ok ? 'OK' : (health.ollama?.deshabilitado ? 'deshabilitado' : 'sin respuesta')}</span></div>
-      <div class="sys-item"><span class="dot ${health.groq?.configurado ? 'ok' : 'bad'}"></span> Groq <span class="val">${health.groq?.configurado ? 'configurado' : 'sin configurar'}</span></div>
-      <div class="sys-item"><span class="dot ${health.ngrok?.ok ? 'ok' : 'bad'}"></span> ngrok <span class="val">${health.ngrok?.ok ? 'OK' : 'sin túnel'}</span></div>
-    </div>
-
-    <div class="subsection-title">Errores recientes (24h)</div>
-    ${erroresHtml}
-
-    <div class="subsection-title">Régimen de mercado</div>
-    <div class="strat-line">${regimenHtml}</div>
-
-    <div class="subsection-title">Market Mood</div>
-    <div class="strat-line">${moodHtml}</div>
-
-    <div class="subsection-title">Decisiones autónomas de la IA</div>
-    <div class="strat-line">${autonomiaHtml}</div>
-
-    <div class="subsection-title">Cooldowns activos</div>
-    <div class="strat-line">${cooldownsHtml}</div>
-
-    <div class="subsection-title">🧠 Análisis Ollama (estratega, cada hora)</div>
-    ${insightsHtml}
-  `;
-}
-
-async function loadSistema(force = false) {
-  try {
-    const [health, system, regime, mood, autonomia, cooldowns, insights] = await Promise.all([
-      fetchJson('/api/health', { force }),
-      fetchJson('/api/system', { force }),
-      fetchJson('/api/regime', { force }),
-      fetchJson('/api/market-mood', { force }),
-      fetchJson('/api/autonomia', { force }),
-      fetchJson('/api/cooldowns', { force }),
-      fetchJson('/api/strategy-insights', { force }),
-    ]);
-    renderSistema([health, system, regime, mood, autonomia, cooldowns, insights]);
-  } catch (err) {
-    $('sistemaContent').innerHTML = '<div class="empty-state">No se pudo cargar el estado del sistema.</div>';
-  }
-}
-
-// ---------- Competencia de estrategias (2026-08-19, FASE 2/3 + TAREA 1,
-// pedido explícito) — Motor B (bot principal, id especial 'motorB') + Bot 2
-// (Grid BTC/ETH) + Bot 3 (DCA Agresivo) + Bot 4 (DCA BTC/ETH, Motor A
-// aislado), cada uno con página completa (header, gráfica, stats,
-// posiciones con PnL en vivo, historial, ranking). Consume
-// /api/competition/* (ver src/api/server.js). competenciaSelectedBotId es
-// SIEMPRE string (los ids de bot_instances vienen como número en el JSON,
-// 'motorB' es string — se normaliza a String() en todos lados para poder
-// comparar contra btn.dataset.botId, que el DOM siempre da como string).
-let competenciaSelectedBotId = null;
-let competenciaChart = null;
-let competenciaChartSeries = null;
-
-function medalFor(posicion) {
-  if (posicion === 1) return '🥇';
-  if (posicion === 2) return '🥈';
-  if (posicion === 3) return '🥉';
-  return `${posicion}️⃣`;
-}
-
-function iconForEstrategia(estrategia) {
-  const icons = { selectiveScalping: '🤖', competitionGrid: '📊', competitionDca: '📈', competitionDcaMotorA: '💰' };
-  return icons[estrategia] || '🏅';
-}
-
-// Etiqueta corta del selector (pedido explícito: "Bot 2 Grid", "Bot 3 DCA",
-// "Bot 4 DCA BTC/ETH") — mantiene el número del bot pero saca el "— Nombre
-// largo" completo.
-function shortLabelForBot(bot) {
-  if (bot.id === 'motorB') return 'Motor B';
-  const prefixMatch = bot.nombre.match(/^(Bot \d+)/);
-  const prefix = prefixMatch ? prefixMatch[1] : bot.nombre;
-  if (bot.estrategia === 'competitionGrid') return `${prefix} Grid`;
-  if (bot.estrategia === 'competitionDca') return `${prefix} DCA`;
-  if (bot.estrategia === 'competitionDcaMotorA') return `${prefix} DCA BTC/ETH`;
-  return bot.nombre;
-}
-
-function renderCompetenciaRanking(ranking) {
-  const container = $('competenciaRanking');
-  if (!ranking || ranking.length === 0) {
-    container.innerHTML = '<div class="empty-state">Sin bots de competencia todavía.</div>';
-    return;
-  }
-  container.innerHTML = ranking.map((r) => `
-    <div class="ranking-row">
-      <span class="medal">${medalFor(r.posicion)}</span>
-      <span class="nombre">${iconForEstrategia(r.estrategia)} ${r.nombre}</span>
-      <span class="capital ${pnlClass(r.pnl)}">${fmtUsd(r.capitalActual)} (${fmtPct(r.pnlPct)})</span>
-    </div>`).join('');
-}
-
-// Orden fijo del selector (pedido explícito: "[Motor B] [Bot 2] [Bot 3] [Bot
-// 4]") — DISTINTO del orden del ranking (que va por capital actual).
-function ordenSelector(ranking) {
-  return [...ranking].sort((a, b) => {
-    if (a.id === 'motorB') return -1;
-    if (b.id === 'motorB') return 1;
-    return a.id - b.id;
-  });
-}
-
-function renderCompetenciaSelector(ranking) {
-  const container = $('competenciaBotSelector');
-  const ordered = ordenSelector(ranking);
-  container.innerHTML = ordered.map((r) => `<button class="bot-selector-btn${String(r.id) === competenciaSelectedBotId ? ' active' : ''}" data-bot-id="${r.id}">${iconForEstrategia(r.estrategia)} ${shortLabelForBot(r)}</button>`).join('');
-  container.querySelectorAll('.bot-selector-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.dataset.botId === competenciaSelectedBotId) return;
-      competenciaSelectedBotId = btn.dataset.botId;
-      container.querySelectorAll('.bot-selector-btn').forEach((b) => b.classList.toggle('active', b === btn));
-      loadCompetenciaDetail(true);
+// ---------- Resolución de bot_instances.id por estrategia (Bot 2/3/4) ----------
+let rankingPromise = null;
+async function getRanking(force = false) {
+  if (force) rankingPromise = null;
+  if (!rankingPromise) {
+    // Si el fetch falla, se limpia la promesa cacheada (en vez de dejar una
+    // promesa RECHAZADA cacheada para siempre) — así la próxima llamada
+    // reintenta contra la red en vez de fallar instantáneo por horas.
+    rankingPromise = fetchJson('/api/competition/ranking', { force }).catch((err) => {
+      rankingPromise = null;
+      throw err;
     });
+  }
+  return rankingPromise;
+}
+async function getBotIdByEstrategia(estrategia) {
+  const ranking = await getRanking();
+  const bot = ranking.find((b) => b.estrategia === estrategia);
+  return bot ? bot.id : null;
+}
+
+// ---------- Sidebar / mobile ----------
+function openSidebar() { $('sidebar').classList.add('open'); $('sidebarOverlay').classList.add('open'); }
+function closeSidebar() { $('sidebar').classList.remove('open'); $('sidebarOverlay').classList.remove('open'); }
+$('hamburgerBtn').addEventListener('click', openSidebar);
+$('sidebarOverlay').addEventListener('click', closeSidebar);
+
+document.querySelectorAll('.nav-item[data-route]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (window.location.hash === `#${btn.dataset.route}`) return;
+    window.location.hash = btn.dataset.route;
   });
+});
+
+// ---------- Sparkline SVG (sin librería — usado en las cards del Overview) ----------
+function sparklineSvg(values, color) {
+  if (!values || values.length < 2) return '<div class="chart-placeholder" style="height:34px;font-size:11px;">Sin datos hoy</div>';
+  const w = 200;
+  const h = 34;
+  const min = Math.min(...values, 0);
+  const max = Math.max(...values, 0);
+  const range = (max - min) || 1;
+  const step = w / (values.length - 1);
+  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`).join(' ');
+  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
-function renderCompetenciaHeader(bot) {
-  const container = $('competenciaHeader');
-  if (!bot) {
-    container.innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
-    return;
-  }
-  container.innerHTML = `
-    <div class="strat-header"><span>${iconForEstrategia(bot.estrategia)} ${bot.nombre}</span>${bot.activo === false ? '<span>⏸️ Pausado</span>' : ''}</div>
-    <div class="strat-line">Capital: <span class="hl">${fmtUsd(bot.capitalActual)}</span> | PnL: <span class="hl ${pnlClass(bot.pnl)}">${fmtUsd(bot.pnl)} (${fmtPct(bot.pnlPct)})</span></div>`;
+// ---------- Lightweight Charts: helper genérico ----------
+const chartInstances = {}; // containerId -> { chart, series }
+function clearAllCharts() {
+  Object.values(chartInstances).forEach((c) => { try { c.chart.remove(); } catch (err) { /* ya destruido */ } });
+  for (const k of Object.keys(chartInstances)) delete chartInstances[k];
 }
-
-function renderCompetenciaStats(bot, trades) {
-  const container = $('competenciaStats');
-  if (!bot) {
-    container.innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
-    return;
-  }
-  const cerrados = (trades || []).filter((t) => t.outcome !== 'open');
-  const mejorTrade = cerrados.length > 0 ? cerrados.reduce((best, t) => (t.pnl > best.pnl ? t : best)) : null;
-  const pfTxt = bot.profitFactor7d >= 999 ? '∞' : (bot.profitFactor7d ?? '—');
-  const abiertos = (bot.posicionesAbiertas || []).length;
-  container.innerHTML = `
-    <div class="strat-line">Trades: <span class="hl">${abiertos} abierto${abiertos === 1 ? '' : 's'}</span> | <span class="hl">${bot.trades7d} cerrado${bot.trades7d === 1 ? '' : 's'} (7 días)</span> | <span class="hl">${bot.tradesHoy} hoy</span></div>
-    <div class="strat-line">WR (7 días): <span class="hl">${bot.winrate7d ?? 0}%</span> | PF (7 días): <span class="hl">${pfTxt}</span></div>
-    <div class="strat-line">Mejor trade: <span class="hl ${mejorTrade ? pnlClass(mejorTrade.pnl) : ''}">${mejorTrade ? `${mejorTrade.pair.replace('/USDT', '')} ${fmtUsd(mejorTrade.pnl)}` : '—'}</span></div>`;
-}
-
-function renderCompetenciaPositions(positions) {
-  const container = $('competenciaPosiciones');
-  if (!positions || positions.length === 0) {
-    container.innerHTML = '<div class="empty-state">Sin posiciones abiertas.</div>';
-    return;
-  }
-  container.innerHTML = positions.map((p) => {
-    const sym = p.pair.replace('/USDT', '');
-    return `<div class="strat-line">${sym} <span class="hl">${fmtUsd(p.sizeUsdt)}</span> @ ${p.entryPrice} → ${p.currentPrice ?? '—'} | <span class="${pnlClass(p.pnlActual)}">${fmtPct(p.pnlPct)} (${fmtUsd(p.pnlActual)})</span> | ${p.tiempoAbierto}</div>`;
-  }).join('');
-}
-
-// Historial (pedido explícito: "Tabla con wins/losses y PnL") — solo trades
-// CERRADOS, las abiertas ya se ven en el bloque de posiciones de arriba.
-function renderCompetenciaTrades(trades) {
-  const container = $('competenciaTradesList');
-  const cerrados = (trades || []).filter((t) => t.outcome !== 'open');
-  if (cerrados.length === 0) {
-    container.innerHTML = '<div class="empty-state">Sin trades cerrados todavía.</div>';
-    return;
-  }
-  container.innerHTML = cerrados.map((t) => {
-    const sym = t.pair.replace('/USDT', '');
-    const fecha = t.closedAt ? new Date(t.closedAt).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
-    return `<div class="strat-line">${sym} <span class="${pnlClass(t.pnl)}">${t.outcome === 'win' ? 'WIN' : 'LOSS'} ${fmtUsd(t.pnl)}</span> · ${fecha}</div>`;
-  }).join('');
-}
-
-function initCompetenciaChart() {
-  const container = $('competenciaChartContainer');
-  competenciaChart = LightweightCharts.createChart(container, {
+function ensureAreaChart(containerId, color = '#00ff88') {
+  if (chartInstances[containerId]) return chartInstances[containerId];
+  const container = $(containerId);
+  if (!container) return null;
+  const chart = LightweightCharts.createChart(container, {
     width: container.clientWidth,
-    height: container.clientHeight,
-    layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
-    grid: { vertLines: { visible: false }, horzLines: { color: '#21262d' } },
-    rightPriceScale: { borderColor: '#30363d' },
-    timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+    height: container.clientHeight || 220,
+    layout: { background: { color: 'transparent' }, textColor: '#64748b', fontSize: 11 },
+    grid: { vertLines: { visible: false }, horzLines: { color: '#1c1c28' } },
+    rightPriceScale: { borderColor: '#2a2a3a' },
+    timeScale: { borderColor: '#2a2a3a', timeVisible: true, secondsVisible: false },
     handleScroll: false,
     handleScale: false,
   });
-  competenciaChartSeries = competenciaChart.addAreaSeries({
-    lineColor: '#00ff88', topColor: 'rgba(0, 255, 136, 0.25)', bottomColor: 'rgba(0, 255, 136, 0)',
+  const series = chart.addAreaSeries({
+    lineColor: color, topColor: `${color}33`, bottomColor: `${color}00`,
     lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
   });
-  new ResizeObserver(() => { if (competenciaChart) competenciaChart.applyOptions({ width: container.clientWidth }); }).observe(container);
+  new ResizeObserver(() => { if (chartInstances[containerId]) chart.applyOptions({ width: container.clientWidth }); }).observe(container);
+  chartInstances[containerId] = { chart, series };
+  return chartInstances[containerId];
 }
-
-async function loadCompetenciaChart(botId, force = false) {
-  try {
-    const raw = await fetchJson(`/api/competition/bot/${botId}/chart?days=7`, { force });
-    if (!raw || raw.length === 0) {
-      $('competenciaChartContainer').style.display = 'none';
-      $('competenciaChartPlaceholder').style.display = 'block';
-      $('competenciaChartPlaceholder').textContent = 'Todavía no hay historial de capital (sin trades cerrados).';
-      return;
-    }
-    const points = raw.map((p) => ({ time: Math.floor(new Date(p.timestamp).getTime() / 1000), value: p.capital }));
-    $('competenciaChartPlaceholder').style.display = 'none';
-    $('competenciaChartContainer').style.display = 'block';
-    if (!competenciaChart) initCompetenciaChart();
-    competenciaChartSeries.setData(points);
-    competenciaChart.timeScale().fitContent();
-  } catch (err) {
-    $('competenciaChartPlaceholder').style.display = 'block';
-    $('competenciaChartPlaceholder').textContent = 'No se pudo cargar la gráfica.';
-  }
-}
-
-async function loadCompetenciaDetail(force = false) {
-  if (!competenciaSelectedBotId) return;
-  try {
-    // limit=50 (no 10): renderCompetenciaStats calcula "mejor trade" sobre
-    // esta misma lista — con pocos trades cargados el mejor trade real
-    // podría no estar entre los últimos 10.
-    const [bot, trades, positions] = await Promise.all([
-      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}`, { force }),
-      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}/trades?limit=50`, { force }),
-      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}/positions`, { force }),
-    ]);
-    renderCompetenciaHeader(bot);
-    renderCompetenciaStats(bot, trades);
-    renderCompetenciaPositions(positions);
-    renderCompetenciaTrades(trades);
-    await loadCompetenciaChart(competenciaSelectedBotId, force);
-  } catch (err) {
-    $('competenciaHeader').innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
-  }
-}
-
-async function loadCompetencia(force = false) {
-  try {
-    const ranking = await fetchJson('/api/competition/ranking', { force });
-    $('competenciaSubtitulo').textContent = `${ranking.length} bots en paper trading | Motor B usa su % del capital real del bot principal, los demás $1,000 propios c/u`;
-    renderCompetenciaRanking(ranking);
-    renderCompetenciaSelector(ranking);
-    if (!competenciaSelectedBotId) {
-      const ordered = ordenSelector(ranking);
-      competenciaSelectedBotId = ordered.length > 0 ? String(ordered[0].id) : null;
-    }
-    await loadCompetenciaDetail(force);
-  } catch (err) {
-    $('competenciaSubtitulo').textContent = 'No se pudo cargar la competencia.';
-    console.warn('loadCompetencia falló:', err.message);
-  }
-}
-
-// ---------- Tabs: cambio instantáneo, carga perezosa una sola vez ----------
-const TAB_LOADERS = {
-  trades: loadTradesTab,
-  estrategias: loadEstrategias,
-  analisis: loadAnalisis,
-  sistema: loadSistema,
-  competencia: loadCompetencia,
-};
-const tabLoadedOnce = new Set();
-let activeTab = 'trades';
-
-function switchTab(tab) {
-  if (tab === activeTab) return;
-  // Defensivo (2026-08-16): si el botón no tiene un loader registrado (data-tab
-  // mal escrito, o un botón nuevo agregado al HTML sin su entrada en
-  // TAB_LOADERS), avisar en consola en vez de tirar "TAB_LOADERS[tab] is not
-  // a function" y dejar la tab a medio cambiar.
-  if (!TAB_LOADERS[tab]) {
-    console.warn('Tab desconocida (sin loader registrado):', tab);
-    return;
-  }
-  activeTab = tab;
-  document.querySelectorAll('.tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
-  document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.toggle('active', panel.id === `tab-${tab}`));
-
-  // Instantáneo: el panel cambia ya (arriba). Si esta tab nunca cargó datos,
-  // se pide ahora en segundo plano; si ya cargó, el caché decide si hace
-  // falta refrescar (ver fetchJson) — nunca bloquea el cambio visual de tab.
-  tabLoadedOnce.add(tab);
-  TAB_LOADERS[tab]();
-}
-
-document.querySelectorAll('.tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-});
-
-// ---------- Gráfica de capital (lazy, después de 500ms) ----------
-const MAX_CHART_POINTS = 200;
-let chart = null;
-let chartSeries = null;
-let currentPeriod = '24h';
-
-// Reduce a lo sumo a MAX_CHART_POINTS, promediando en baldes — mantiene el
-// tiempo estrictamente ascendente (Lightweight Charts lo exige).
 function downsample(points, maxPoints) {
   if (points.length <= maxPoints) return points;
   const bucketSize = Math.ceil(points.length / maxPoints);
@@ -876,106 +136,691 @@ function downsample(points, maxPoints) {
   return result;
 }
 
-function initChart() {
-  const container = $('chartContainer');
-  chart = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
-    height: container.clientHeight,
-    layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
-    grid: { vertLines: { visible: false }, horzLines: { color: '#21262d' } },
-    rightPriceScale: { borderColor: '#30363d' },
-    timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
-    handleScroll: false,
-    handleScale: false,
-  });
-  chartSeries = chart.addAreaSeries({
-    lineColor: '#00ff88',
-    topColor: 'rgba(0, 255, 136, 0.25)',
-    bottomColor: 'rgba(0, 255, 136, 0)',
-    lineWidth: 2,
-    priceLineVisible: false,
-    lastValueVisible: true,
-  });
-
-  new ResizeObserver(() => {
-    if (chart) chart.applyOptions({ width: container.clientWidth });
-  }).observe(container);
+function modePillHtml(modo) {
+  return modo === 'live' ? '<span class="pill mode-live">🔴 LIVE</span>' : '<span class="pill mode-paper">○ PAPER</span>';
+}
+function statusPillHtml(activo) {
+  if (activo === false) return '<span class="pill status-inactive"><span class="dot"></span>PAUSADO</span>';
+  return '<span class="pill status-active"><span class="dot ok"></span>ACTIVE</span>';
+}
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-async function loadChart(period, force = false) {
+// =========================================================================
+// PÁGINA: OVERVIEW
+// =========================================================================
+function overviewSkeleton() {
+  return `
+    <div class="page-header">
+      <div class="ph-title">TOTAL PORTFOLIO VALUE</div>
+      <div class="ph-value" id="ovCapital">—</div>
+      <div class="ph-sub">
+        <span id="ovPnlInline">—</span>
+        <span id="ovStatusPill"></span>
+        <span id="ovModePill"></span>
+      </div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-box"><div class="stat-label">24H Profit/Loss</div><div class="stat-value" id="ovPnl24h">—</div></div>
+      <div class="stat-box"><div class="stat-label">Active Bots</div><div class="stat-value" id="ovActiveBots">—</div></div>
+      <div class="stat-box"><div class="stat-label">Win Rate</div><div class="stat-value" id="ovWinRate">—</div></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-title">Capital total</div>
+      <div class="period-selector" id="ovPeriodSelector">
+        <button class="period-btn" data-period="24h">24H</button>
+        <button class="period-btn active" data-period="7d">7D</button>
+        <button class="period-btn" data-period="30d">30D</button>
+      </div>
+      <div id="ovChartPlaceholder" class="chart-placeholder">Cargando gráfica…</div>
+      <div id="ovChartContainer" class="chart-el" style="display:none;"></div>
+    </div>
+    <div class="section-title">Active Strategy Performance</div>
+    <div class="bots-grid" id="ovBotsGrid"><div class="empty-state skeleton">Cargando…</div></div>
+  `;
+}
+
+let ovCurrentPeriod = '7d';
+async function loadOverviewChart(period, force = false) {
   try {
     const raw = await fetchJson(`/api/capital-chart?period=${period}`, { force });
-    if (!raw || raw.length === 0) return;
-    const points = downsample(raw, MAX_CHART_POINTS);
-    // El contenedor tiene que estar visible ANTES de crear/redimensionar el
-    // chart — Lightweight Charts mide clientWidth/clientHeight al crearse, y
-    // un elemento con display:none siempre mide 0x0 (bug real encontrado en
-    // pruebas: la gráfica quedaba invisible aunque los datos sí llegaban).
-    $('chartPlaceholder').style.display = 'none';
-    $('chartContainer').style.display = 'block';
-    if (!chart) initChart();
-    chartSeries.setData(points);
+    if (!raw || raw.length === 0) {
+      $('ovChartPlaceholder').style.display = 'flex';
+      $('ovChartPlaceholder').textContent = 'Sin datos de capital todavía.';
+      return;
+    }
+    const points = downsample(raw, 200);
+    $('ovChartPlaceholder').style.display = 'none';
+    $('ovChartContainer').style.display = 'block';
+    const { chart, series } = ensureAreaChart('ovChartContainer', '#00ff88');
+    series.setData(points);
     chart.timeScale().fitContent();
   } catch (err) {
-    $('chartPlaceholder').textContent = 'No se pudo cargar la gráfica.';
+    if ($('ovChartPlaceholder')) { $('ovChartPlaceholder').style.display = 'flex'; $('ovChartPlaceholder').textContent = 'No se pudo cargar la gráfica.'; }
   }
 }
 
-document.querySelectorAll('.period-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.period === currentPeriod) return;
-    document.querySelectorAll('.period-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    currentPeriod = btn.dataset.period;
-    loadChart(currentPeriod, true);
+function renderOverviewBots(bots) {
+  const container = $('ovBotsGrid');
+  if (!bots || bots.length === 0) {
+    container.innerHTML = '<div class="empty-state">Sin bots activos.</div>';
+    return;
+  }
+  container.innerHTML = bots.map((b) => {
+    const color = b.dailyPnl >= 0 ? '#00ff88' : '#ff4444';
+    const pfTxt = b.pfHoy === null || b.pfHoy === undefined ? '—' : (b.pfHoy >= 999 ? '∞' : b.pfHoy.toFixed(2));
+    const pfBadge = b.trades > 0 ? (b.pfHoy >= 1.3 ? ' 🌟' : b.pfHoy >= 1.0 ? ' ✅' : ' ⚠️') : '';
+    return `
+      <div class="bot-card" data-bot-route="${b.id}">
+        <div class="bc-top">
+          <div class="bc-name">${b.emoji} ${esc(b.nombre)}</div>
+          ${b.activo === false ? '<span class="pill status-inactive">Pausado</span>' : ''}
+        </div>
+        <div class="bc-sub">${esc(b.subtitulo)}</div>
+        <div class="bc-row"><span class="label">Daily</span><span class="value ${pnlClass(b.dailyPnl)}">${fmtUsd(b.dailyPnl)}</span></div>
+        <div class="bc-row"><span class="label">Trades</span><span class="value">${b.trades}</span></div>
+        <div class="bc-row"><span class="label">PF hoy</span><span class="value">${pfTxt}${pfBadge}</span></div>
+        <div class="bc-spark">${sparklineSvg(b.sparkline, color)}</div>
+      </div>`;
+  }).join('');
+
+  container.querySelectorAll('.bot-card').forEach((card) => {
+    card.addEventListener('click', async () => {
+      const id = card.dataset.botRoute;
+      if (id === 'motorB') { window.location.hash = 'motorb'; return; }
+      if (id === 'motorA') { window.location.hash = 'motora'; return; }
+      const ranking = await getRanking();
+      const bot = ranking.find((b) => String(b.id) === id);
+      const routeMap = { competitionGrid: 'bot2', competitionDca: 'bot3', competitionDcaMotorA: 'bot4' };
+      if (bot && routeMap[bot.estrategia]) window.location.hash = routeMap[bot.estrategia];
+    });
   });
-});
+}
 
-// ---------- Carga progresiva + polling ----------
-// 0-500ms: header + cards (ya en marcha) + tab activa (posiciones).
-// 500ms+: gráfica (lazy, después de lo importante).
-// Timers separados por sección, todos en pausa cuando la pestaña del
-// navegador está oculta (evita fetches acumulados en móvil al volver de
-// segundo plano — una de las causas típicas de "se bugea al refrescar").
-let summaryTimer = null;
-let tabTimer = null;
-let chartTimer = null;
+async function loadOverview() {
+  $('content').innerHTML = overviewSkeleton();
+  // Sincroniza el botón de período activo con ovCurrentPeriod — el polling
+  // de 20s reconstruye este HTML entero, así que sin esto el botón activo
+  // "resetearía" a 7D visualmente aunque el usuario hubiera elegido otro.
+  $('ovPeriodSelector').querySelectorAll('.period-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.period === ovCurrentPeriod);
+    btn.addEventListener('click', () => {
+      if (btn.dataset.period === ovCurrentPeriod) return;
+      $('ovPeriodSelector').querySelectorAll('.period-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      ovCurrentPeriod = btn.dataset.period;
+      loadOverviewChart(ovCurrentPeriod, true);
+    });
+  });
 
+  try {
+    const data = await fetchJson('/api/overview');
+    $('ovCapital').textContent = fmtUsd(data.capitalTotal);
+    $('ovPnlInline').innerHTML = `<span class="${pnlClass(data.pnlHoy)}">${fmtUsd(data.pnlHoy)} (${fmtPct(data.pnlPct)})</span>`;
+    $('ovStatusPill').innerHTML = data.estado === 'operando'
+      ? '<span class="pill status-active"><span class="dot ok"></span>OPERANDO</span>'
+      : '<span class="pill status-paused"><span class="dot bad"></span>PAUSADO</span>';
+    $('ovModePill').innerHTML = modePillHtml(data.modo);
+
+    const pnl24hEl = $('ovPnl24h');
+    pnl24hEl.textContent = `${fmtUsd(data.pnlHoy)} (${fmtPct(data.pnlPct)})`;
+    pnl24hEl.className = `stat-value ${pnlClass(data.pnlHoy)}`;
+    $('ovActiveBots').textContent = `${data.botsActivos} Running`;
+    $('ovWinRate').textContent = `${data.winRateGlobal}% / ${data.tradesHoy} trades`;
+
+    renderOverviewBots(data.bots);
+  } catch (err) {
+    $('ovBotsGrid').innerHTML = '<div class="empty-state">No se pudo cargar el overview (reintentando…)</div>';
+  }
+  loadOverviewChart(ovCurrentPeriod);
+}
+
+// =========================================================================
+// PÁGINA: MOTOR B — Scalping Selectivo
+// =========================================================================
+function motorBSkeleton() {
+  return `
+    <div class="bot-page-header">
+      <div class="bph-title">🔄 Motor B — Scalping Selectivo <span id="mbStatusPill"></span></div>
+      <div class="bph-capital"><span id="mbCapital">—</span> <span id="mbPct" class="pct"></span> ${modePillHtml('paper')}</div>
+    </div>
+
+    <div class="subnav" id="mbSubnav">
+      <button class="subnav-btn active" data-sub="portfolio">Portfolio</button>
+      <button class="subnav-btn" data-sub="orders">Orders</button>
+      <button class="subnav-btn" data-sub="history">History</button>
+    </div>
+
+    <div class="stat-row" id="mbStatRow">
+      <div class="stat-box"><div class="stat-label">Avg Profit/Trade</div><div class="stat-value" id="mbAvgProfit">—</div></div>
+      <div class="stat-box"><div class="stat-label">Max Drawdown (24h)</div><div class="stat-value" id="mbDrawdown">—</div></div>
+      <div class="stat-box"><div class="stat-label">Total Trades (hoy)</div><div class="stat-value" id="mbTrades">—</div></div>
+    </div>
+
+    <div class="subnav-panel active" data-panel="portfolio">
+      <div class="chart-card">
+        <div class="chart-card-title">Capital — Motor B</div>
+        <div class="period-selector" id="mbPeriodSelector">
+          <button class="period-btn active" data-period="1">1D</button>
+          <button class="period-btn" data-period="7">7D</button>
+          <button class="period-btn" data-period="30">30D</button>
+        </div>
+        <div id="mbChartPlaceholder" class="chart-placeholder">Cargando gráfica…</div>
+        <div id="mbChartContainer" class="chart-el" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="subnav-panel" data-panel="orders">
+      <div class="panel">
+        <div class="panel-title">Posiciones abiertas (PnL en vivo)</div>
+        <div id="mbPositions"><div class="empty-state skeleton">Cargando…</div></div>
+      </div>
+    </div>
+
+    <div class="subnav-panel" data-panel="history">
+      <div class="panel">
+        <div class="panel-title">Recent Trades</div>
+        <div class="table-wrap" id="mbHistory"><div class="empty-state skeleton">Cargando…</div></div>
+      </div>
+    </div>
+  `;
+}
+
+function tradesTableHtml(trades) {
+  if (!trades || trades.length === 0) return '<div class="empty-state">Sin trades todavía.</div>';
+  const rows = trades.map((t) => {
+    const time = fmtDateShort(t.closedAt || t.createdAt);
+    const sideTxt = (t.side || 'buy').toUpperCase();
+    const rowClass = t.outcome === 'open' ? '' : (t.pnl >= 0 ? 'row-buy' : 'row-sell');
+    return `
+      <tr class="${rowClass}">
+        <td>${time}</td>
+        <td>${esc(t.pair)}</td>
+        <td class="side-cell side-${t.side || 'buy'}">${sideTxt}</td>
+        <td>${fmtUsdPrecise(t.entryPrice, t.entryPrice < 10 ? 4 : 2)}</td>
+        <td>${fmtUsd(t.sizeUsdt)}</td>
+        <td class="${pnlClass(t.pnl)}">${t.outcome === 'open' ? 'abierto' : fmtUsd(t.pnl)}</td>
+      </tr>`;
+  }).join('');
+  return `
+    <table class="data-table">
+      <thead><tr><th>Time</th><th>Pair</th><th>Side</th><th>Price</th><th>Size</th><th>PnL</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function positionsListHtml(positions) {
+  if (!positions || positions.length === 0) return '<div class="empty-state">Sin posiciones abiertas.</div>';
+  return `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Pair</th><th>Size</th><th>Entry</th><th>Current</th><th>PnL</th><th>Tiempo</th></tr></thead>
+    <tbody>
+      ${positions.map((p) => `
+        <tr>
+          <td>${esc(p.pair)}</td>
+          <td>${fmtUsd(p.sizeUsdt)}</td>
+          <td>${fmtUsdPrecise(p.entryPrice, p.entryPrice < 10 ? 4 : 2)}</td>
+          <td>${p.currentPrice !== null ? fmtUsdPrecise(p.currentPrice, p.currentPrice < 10 ? 4 : 2) : '—'}</td>
+          <td class="${pnlClass(p.pnlActual)}">${fmtUsd(p.pnlActual)} (${fmtPct(p.pnlPct)})</td>
+          <td>${p.tiempoAbierto || '—'}</td>
+        </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+
+let mbPeriod = '1';
+async function loadMotorBChart(days, force = false) {
+  try {
+    const raw = await fetchJson(`/api/competition/bot/motorB/chart?days=${days}`, { force });
+    if (!raw || raw.length === 0) {
+      $('mbChartPlaceholder').style.display = 'flex';
+      $('mbChartPlaceholder').textContent = 'Sin historial de capital todavía (sin trades cerrados).';
+      return;
+    }
+    const points = raw.map((p) => ({ time: Math.floor(new Date(p.timestamp).getTime() / 1000), value: p.capital }));
+    $('mbChartPlaceholder').style.display = 'none';
+    $('mbChartContainer').style.display = 'block';
+    const { chart, series } = ensureAreaChart('mbChartContainer', '#00ff88');
+    series.setData(downsample(points, 200));
+    chart.timeScale().fitContent();
+  } catch (err) {
+    $('mbChartPlaceholder').style.display = 'flex';
+    $('mbChartPlaceholder').textContent = 'No se pudo cargar la gráfica.';
+  }
+}
+
+function wireSubnav(navId, onSwitch) {
+  $(navId).querySelectorAll('.subnav-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $(navId).querySelectorAll('.subnav-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.subnav-panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === btn.dataset.sub));
+      onSwitch(btn.dataset.sub);
+    });
+  });
+}
+
+const mbLoadedOnce = new Set();
+let mbActiveSub = 'portfolio';
+async function loadMotorB() {
+  $('content').innerHTML = motorBSkeleton();
+
+  // Sincroniza sub-tab y período activos con el estado guardado — el
+  // polling de 20s reconstruye este HTML entero (ver applyRoute), así que
+  // sin esto el usuario mirando "Orders"/"History" se vería "devuelto" a
+  // Portfolio en cada refresh (bug real, encontrado en revisión).
+  $('mbSubnav').querySelectorAll('.subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.sub === mbActiveSub));
+  document.querySelectorAll('.subnav-panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === mbActiveSub));
+
+  $('mbPeriodSelector').querySelectorAll('.period-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.period === mbPeriod);
+    btn.addEventListener('click', () => {
+      if (btn.dataset.period === mbPeriod) return;
+      $('mbPeriodSelector').querySelectorAll('.period-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      mbPeriod = btn.dataset.period;
+      loadMotorBChart(mbPeriod, true);
+    });
+  });
+  mbLoadedOnce.clear();
+  wireSubnav('mbSubnav', (sub) => {
+    mbActiveSub = sub;
+    if (sub === 'orders' && !mbLoadedOnce.has('orders')) { mbLoadedOnce.add('orders'); loadMotorBOrders(); }
+    if (sub === 'history' && !mbLoadedOnce.has('history')) { mbLoadedOnce.add('history'); loadMotorBHistory(); }
+  });
+  // El sub-tab activo tras sincronizar arriba puede no ser "portfolio" —
+  // wireSubnav solo dispara el loader en el click, así que hace falta
+  // pedir sus datos ahora mismo si venimos de un refresh en Orders/History.
+  if (mbActiveSub === 'orders') { mbLoadedOnce.add('orders'); loadMotorBOrders(); }
+  if (mbActiveSub === 'history') { mbLoadedOnce.add('history'); loadMotorBHistory(); }
+
+  try {
+    const [bot, stats] = await Promise.all([
+      fetchJson('/api/competition/bot/motorB'),
+      fetchJson('/api/bot/motorb/stats'),
+    ]);
+    $('mbStatusPill').innerHTML = statusPillHtml(bot.activo);
+    $('mbCapital').textContent = fmtUsd(bot.capitalActual);
+    const pctEl = $('mbPct');
+    pctEl.textContent = fmtPct(bot.pnlPct);
+    pctEl.className = `pct ${pnlClass(bot.pnlPct)}`;
+
+    $('mbAvgProfit').innerHTML = `<span class="${pnlClass(stats.avgProfitPerTradeUsd)}">${fmtUsd(stats.avgProfitPerTradeUsd)}</span>`;
+    $('mbAvgProfit').insertAdjacentHTML('beforeend', `<div class="stat-sub">${fmtPct(stats.avgProfitPerTradePct, 3)}</div>`);
+    $('mbDrawdown').innerHTML = `<span class="pnl-neg">-${stats.maxDrawdown24hPct}%</span>`;
+    $('mbDrawdown').insertAdjacentHTML('beforeend', `<div class="stat-sub">-${fmtUsd(stats.maxDrawdown24hUsd)}</div>`);
+    $('mbTrades').textContent = stats.totalTradesHoy;
+  } catch (err) {
+    $('mbStatRow').innerHTML = '<div class="empty-state">No se pudo cargar el estado de Motor B.</div>';
+  }
+  loadMotorBChart(mbPeriod);
+}
+async function loadMotorBOrders() {
+  try {
+    const positions = await fetchJson('/api/competition/bot/motorB/positions');
+    $('mbPositions').innerHTML = positionsListHtml(positions);
+  } catch (err) {
+    $('mbPositions').innerHTML = '<div class="empty-state">No se pudo cargar.</div>';
+  }
+}
+async function loadMotorBHistory() {
+  try {
+    const trades = await fetchJson('/api/competition/bot/motorB/trades?limit=50');
+    const closed = trades.filter((t) => t.outcome !== 'open');
+    $('mbHistory').innerHTML = tradesTableHtml(closed);
+  } catch (err) {
+    $('mbHistory').innerHTML = '<div class="empty-state">No se pudo cargar.</div>';
+  }
+}
+
+// =========================================================================
+// PÁGINA: MOTOR A DCA (real, parte del bot principal)
+// =========================================================================
+function accumulationPairBlock(label, p) {
+  if (!p) return '';
+  const progressPct = p.maxCompras > 0 ? Math.round((p.compras / p.maxCompras) * 100) : 0;
+  return `
+    <div class="pair-block">
+      <div class="pair-block-title">${label} <span class="stat-sub">${p.compras}/${p.maxCompras} compras</span></div>
+      <div class="kv-row"><span class="label">Avg Entry</span><span class="value">${p.avgEntry !== null ? fmtUsdPrecise(p.avgEntry) : '—'}</span></div>
+      <div class="kv-row"><span class="label">Precio actual</span><span class="value">${p.currentPrice !== null ? fmtUsdPrecise(p.currentPrice) : '—'}</span></div>
+      <div class="kv-row"><span class="label">Capital invertido</span><span class="value">${fmtUsd(p.capitalInvertido ?? p.totalInvested)}</span></div>
+      ${p.capitalAsignado !== undefined ? `<div class="kv-row"><span class="label">Capital asignado</span><span class="value">${fmtUsd(p.capitalAsignado)}</span></div>` : ''}
+      <div class="ladder"><div class="ladder-step"><div class="ladder-bar"><div class="ladder-fill" style="width:${progressPct}%"></div></div><span class="stat-sub">${progressPct}%</span></div></div>
+      ${p.nextTriggerPrice !== null ? `
+        <div class="kv-row" style="margin-top:8px;"><span class="label">Próximo trigger</span><span class="value">${fmtUsdPrecise(p.nextTriggerPrice)}</span></div>
+        <div class="kv-row"><span class="label">Drop necesario</span><span class="value pnl-neg">-${p.dropRequiredPct}%</span></div>
+      ` : `<div class="stat-sub" style="margin-top:8px;">${p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.'}</div>`}
+    </div>`;
+}
+
+function motorASkeleton() {
+  return `
+    <div class="bot-page-header">
+      <div class="bph-title">💛 Motor A — DCA BTC/ETH <span id="maStatusPill"></span></div>
+      <div class="stat-sub">Parte del bot principal (smartDCA) — no es competencia, capital real del bot.</div>
+      <div class="bph-capital"><span id="maCapital">—</span> ${modePillHtml('paper')}</div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat-box"><div class="stat-label">Profit Factor (7d)</div><div class="stat-value" id="maPf">—</div></div>
+      <div class="stat-box"><div class="stat-label">Winrate (7d)</div><div class="stat-value" id="maWr">—</div></div>
+      <div class="stat-box"><div class="stat-label">Trades (hoy / 7d)</div><div class="stat-value" id="maTrades">—</div></div>
+    </div>
+
+    <div class="section-title">Accumulation Path</div>
+    <div class="two-col">
+      <div>
+        <div id="maBtcBlock"></div>
+        <div id="maEthBlock"></div>
+      </div>
+      <div>
+        <div class="panel">
+          <div class="panel-title">Capital asignado</div>
+          <div id="maCapitalPanel"><div class="empty-state skeleton">Cargando…</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Configuración</div>
+          <div id="maConfigPanel"><div class="empty-state skeleton">Cargando…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">DCA Execution History</div>
+      <div class="table-wrap" id="maHistory"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+  `;
+}
+
+async function loadMotorA() {
+  $('content').innerHTML = motorASkeleton();
+  try {
+    const data = await fetchJson('/api/bot/motora/stats');
+    $('maStatusPill').innerHTML = statusPillHtml(data.activo);
+    $('maCapital').textContent = fmtUsd(data.capitalAsignado);
+    $('maPf').textContent = data.pf7d >= 999 ? '∞' : data.pf7d;
+    $('maWr').textContent = `${data.winrate7d}%`;
+    $('maTrades').textContent = `${data.tradesHoy} / ${data.trades7d}`;
+
+    $('maBtcBlock').innerHTML = accumulationPairBlock('₿ BTC', data.btc);
+    $('maEthBlock').innerHTML = accumulationPairBlock('Ξ ETH', data.eth);
+
+    $('maCapitalPanel').innerHTML = `
+      <div class="kv-row"><span class="label">Total (${data.capitalPct}%)</span><span class="value">${fmtUsd(data.capitalAsignado)}</span></div>
+      <div class="kv-row"><span class="label">BTC</span><span class="value">${fmtUsd(data.btc.capitalAsignado)}</span></div>
+      <div class="kv-row"><span class="label">ETH</span><span class="value">${fmtUsd(data.eth.capitalAsignado)}</span></div>
+      <div class="kv-row"><span class="label">PnL 7d</span><span class="value ${pnlClass(data.pnl7d)}">${fmtUsd(data.pnl7d)}</span></div>`;
+
+    $('maConfigPanel').innerHTML = `
+      <div class="kv-row"><span class="label">Drop</span><span class="value">${esc(data.config.dropModeLabel)}</span></div>
+      <div class="kv-row"><span class="label">Take Profit</span><span class="value">${data.config.tpMinPct}% – ${data.config.tpMaxPct}%</span></div>
+      <div class="kv-row"><span class="label">Máx. compras</span><span class="value">${data.config.maxCompras}</span></div>
+      <div class="kv-row"><span class="label">Timeout</span><span class="value">${data.config.timeoutHoras}h</span></div>`;
+
+    $('maHistory').innerHTML = tradesTableHtml(data.historial.filter((t) => t.outcome !== 'open'));
+  } catch (err) {
+    $('content').querySelector('.two-col')?.insertAdjacentHTML('beforebegin', '<div class="empty-state">No se pudo cargar Motor A.</div>');
+  }
+}
+
+// =========================================================================
+// PÁGINA: BOT 2 — GRID BTC/ETH
+// =========================================================================
+function gridLevelsTable(pair, data) {
+  if (!data || data.currentPrice === null) return '<div class="empty-state">Sin datos de precio.</div>';
+  const rows = [];
+  (data.buyLevels || []).forEach((l) => {
+    rows.push({ price: l.price, type: 'BUY', status: l.status === 'FILLED' ? 'filled' : 'pending-buy', statusLabel: l.status === 'FILLED' ? 'FILLED' : 'PENDING', amount: data.capitalPorNivel / l.price, total: data.capitalPorNivel });
+  });
+  (data.sellLevels || []).forEach((l) => {
+    rows.push({ price: l.price, type: 'SELL', status: 'pending-sell', statusLabel: 'PENDING', amount: l.amountUsd / l.price, total: l.amountUsd });
+  });
+  rows.push({ price: data.currentPrice, type: 'CURRENT', status: 'current', statusLabel: 'PRECIO ACTUAL', amount: null, total: null });
+  rows.sort((a, b) => b.price - a.price);
+
+  const rowsHtml = rows.map((r) => `
+    <tr class="${r.type === 'CURRENT' ? '' : (r.type === 'BUY' ? 'row-buy' : 'row-sell')}">
+      <td>${r.type === 'CURRENT' ? '⭐ ACTUAL' : r.type}</td>
+      <td>${fmtUsdPrecise(r.price, r.price < 10 ? 4 : 2)}</td>
+      <td>${r.amount !== null ? r.amount.toFixed(6) : '—'}</td>
+      <td>${r.total !== null ? fmtUsd(r.total) : '—'}</td>
+      <td><span class="badge-status ${r.status}">${r.statusLabel}</span></td>
+    </tr>`).join('');
+
+  return `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Type</th><th>Price</th><th>Amount</th><th>Total</th><th>Status</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table></div>`;
+}
+
+function bot2Skeleton() {
+  return `
+    <div class="bot-page-header">
+      <div class="bph-title">📐 Bot 2 — Grid BTC/ETH <span id="b2StatusPill"></span></div>
+      <div class="bph-capital"><span id="b2Capital">—</span> <span id="b2Pct" class="pct"></span> ${modePillHtml('paper')}</div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-box"><div class="stat-label">Grid Profit</div><div class="stat-value" id="b2GridProfit">—</div></div>
+      <div class="stat-box"><div class="stat-label">Floating PnL</div><div class="stat-value" id="b2Floating">—</div></div>
+      <div class="stat-box"><div class="stat-label">Grids Filled</div><div class="stat-value" id="b2Filled">—</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">₿ BTC/USDT — Grid Levels</div>
+      <div id="b2BtcTable"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Ξ ETH/USDT — Grid Levels</div>
+      <div id="b2EthTable"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+  `;
+}
+
+async function loadBot2() {
+  $('content').innerHTML = bot2Skeleton();
+  try {
+    const id = await getBotIdByEstrategia('competitionGrid');
+    if (id === null) throw new Error('bot no encontrado');
+    const [bot, positions, levels] = await Promise.all([
+      fetchJson(`/api/competition/bot/${id}`),
+      fetchJson(`/api/competition/bot/${id}/positions`),
+      fetchJson('/api/bot/grid/levels'),
+    ]);
+    $('b2StatusPill').innerHTML = statusPillHtml(bot.activo);
+    $('b2Capital').textContent = fmtUsd(bot.capitalActual);
+    const pctEl = $('b2Pct');
+    pctEl.textContent = fmtPct(bot.pnlPct);
+    pctEl.className = `pct ${pnlClass(bot.pnlPct)}`;
+
+    const gridProfitEl = $('b2GridProfit');
+    gridProfitEl.textContent = fmtUsd(bot.pnl);
+    gridProfitEl.className = `stat-value ${pnlClass(bot.pnl)}`;
+
+    const floating = positions.reduce((s, p) => s + (p.pnlActual || 0), 0);
+    const floatEl = $('b2Floating');
+    floatEl.textContent = fmtUsd(floating);
+    floatEl.className = `stat-value ${pnlClass(floating)}`;
+
+    const totalLlenos = (levels['BTC/USDT']?.nivelesLlenos || 0) + (levels['ETH/USDT']?.nivelesLlenos || 0);
+    const totalNiveles = (levels['BTC/USDT']?.nivelesTotal || 0) + (levels['ETH/USDT']?.nivelesTotal || 0);
+    $('b2Filled').textContent = `${totalLlenos}/${totalNiveles}`;
+
+    $('b2BtcTable').innerHTML = gridLevelsTable('BTC/USDT', levels['BTC/USDT']);
+    $('b2EthTable').innerHTML = gridLevelsTable('ETH/USDT', levels['ETH/USDT']);
+  } catch (err) {
+    $('content').innerHTML += '<div class="empty-state">No se pudo cargar Bot 2 — Grid.</div>';
+  }
+}
+
+// =========================================================================
+// PÁGINAS: BOT 3 (DCA Agresivo) / BOT 4 (DCA BTC/ETH) — renderer compartido
+// =========================================================================
+function dcaBotSkeleton(title, emoji) {
+  return `
+    <div class="bot-page-header">
+      <div class="bph-title">${emoji} ${esc(title)} <span id="dcaStatusPill"></span></div>
+      <div class="bph-capital"><span id="dcaCapital">—</span> <span id="dcaPct" class="pct"></span> ${modePillHtml('paper')}</div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-box"><div class="stat-label">PnL total</div><div class="stat-value" id="dcaPnl">—</div></div>
+      <div class="stat-box"><div class="stat-label">Winrate (7d)</div><div class="stat-value" id="dcaWr">—</div></div>
+      <div class="stat-box"><div class="stat-label">Trades hoy / 7d</div><div class="stat-value" id="dcaTrades">—</div></div>
+    </div>
+    <div class="section-title">Accumulation Path</div>
+    <div class="two-col">
+      <div id="dcaPairBlocks"></div>
+      <div>
+        <div class="panel">
+          <div class="panel-title">Strategy Config</div>
+          <div id="dcaConfigPanel"><div class="empty-state skeleton">Cargando…</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">DCA Execution History</div>
+      <div class="table-wrap" id="dcaHistory"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+  `;
+}
+
+async function loadDcaBotPage(estrategia, title, emoji) {
+  $('content').innerHTML = dcaBotSkeleton(title, emoji);
+  try {
+    const id = await getBotIdByEstrategia(estrategia);
+    if (id === null) throw new Error('bot no encontrado');
+    const [bot, trades, path] = await Promise.all([
+      fetchJson(`/api/competition/bot/${id}`),
+      fetchJson(`/api/competition/bot/${id}/trades?limit=50`),
+      fetchJson(`/api/bot/dca/${id}/path`),
+    ]);
+    $('dcaStatusPill').innerHTML = statusPillHtml(bot.activo);
+    $('dcaCapital').textContent = fmtUsd(bot.capitalActual);
+    const pctEl = $('dcaPct');
+    pctEl.textContent = fmtPct(bot.pnlPct);
+    pctEl.className = `pct ${pnlClass(bot.pnlPct)}`;
+
+    const pnlEl = $('dcaPnl');
+    pnlEl.textContent = fmtUsd(bot.pnl);
+    pnlEl.className = `stat-value ${pnlClass(bot.pnl)}`;
+    $('dcaWr').textContent = `${bot.winrate7d}%`;
+    $('dcaTrades').textContent = `${bot.tradesHoy} / ${bot.trades7d}`;
+
+    const pairEntries = Object.entries(path.pares);
+    $('dcaPairBlocks').innerHTML = pairEntries.map(([pair, p]) => accumulationPairBlock(pair.split('/')[0], { ...p, capitalInvertido: p.totalInvested })).join('');
+
+    $('dcaConfigPanel').innerHTML = `
+      <div class="kv-row"><span class="label">Orden por compra</span><span class="value">${path.config.baseOrderUsd !== null ? fmtUsd(path.config.baseOrderUsd) : 'variable (IA)'}</span></div>
+      <div class="kv-row"><span class="label">Drop trigger</span><span class="value">${esc(path.config.dropPctLabel)}</span></div>
+      <div class="kv-row"><span class="label">Take Profit</span><span class="value">${path.config.tpMinPct}% – ${path.config.tpMaxPct}%</span></div>
+      <div class="kv-row"><span class="label">Máx. compras</span><span class="value">${path.config.maxCompras}</span></div>`;
+
+    const closed = trades.filter((t) => t.outcome !== 'open');
+    $('dcaHistory').innerHTML = tradesTableHtml(closed);
+  } catch (err) {
+    $('content').innerHTML += `<div class="empty-state">No se pudo cargar ${esc(title)}.</div>`;
+  }
+}
+
+// =========================================================================
+// PÁGINA: SETTINGS
+// =========================================================================
+function settingsSkeleton() {
+  return `
+    <div class="page-header">
+      <div class="ph-title">Settings</div>
+      <div class="ph-value" style="font-size:22px;">Configuración del dashboard</div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Estado del bot</div>
+      <div id="setStatus"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+    <div class="panel">
+      <div class="settings-field">
+        <label>API base (ngrok)</label>
+        <input type="text" id="apiBaseInput" value="${esc(API_BASE)}">
+      </div>
+      <button class="btn" id="apiBaseSave">Guardar y recargar</button>
+      <div class="stat-sub" style="margin-top:10px;">También podés pasar <code>?api=https://tu-url</code> en la URL — se guarda solo para este navegador.</div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Acerca de</div>
+      <div class="kv-row"><span class="label">Dashboard</span><span class="value">Nuvera Bot — Institutional</span></div>
+      <div class="kv-row"><span class="label">Repositorio bot</span><span class="value"><a href="https://github.com/alexys1/nuvera-trading-bot" target="_blank" rel="noopener">nuvera-trading-bot</a></span></div>
+      <div class="kv-row"><span class="label">Repositorio dashboard</span><span class="value"><a href="https://github.com/alexys1/nuvera-dashboard" target="_blank" rel="noopener">nuvera-dashboard</a></span></div>
+    </div>
+  `;
+}
+
+async function loadSettings() {
+  $('content').innerHTML = settingsSkeleton();
+  $('apiBaseSave').addEventListener('click', () => {
+    const val = $('apiBaseInput').value.trim();
+    if (!val) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('api', val);
+    window.location.href = url.toString();
+  });
+  try {
+    const data = await fetchJson('/api/overview');
+    $('setStatus').innerHTML = `
+      <div class="kv-row"><span class="label">Estado</span><span class="value">${data.estado === 'operando' ? '✅ Operando' : '⏸️ Pausado'}</span></div>
+      <div class="kv-row"><span class="label">Modo</span><span class="value">${data.modo === 'live' ? '🔴 LIVE' : '📄 PAPER'}</span></div>
+      <div class="kv-row"><span class="label">Capital total</span><span class="value">${fmtUsd(data.capitalTotal)}</span></div>
+      <div class="kv-row"><span class="label">Bots activos</span><span class="value">${data.botsActivos}</span></div>`;
+  } catch (err) {
+    $('setStatus').innerHTML = '<div class="empty-state">No se pudo conectar a la API.</div>';
+  }
+}
+
+// =========================================================================
+// ROUTER
+// =========================================================================
+const ROUTES = ['overview', 'motorb', 'motora', 'bot2', 'bot3', 'bot4', 'settings'];
+const ROUTE_LOADERS = {
+  overview: loadOverview,
+  motorb: loadMotorB,
+  motora: loadMotorA,
+  bot2: loadBot2,
+  bot3: () => loadDcaBotPage('competitionDca', 'Bot 3 — DCA Agresivo', '📈'),
+  bot4: () => loadDcaBotPage('competitionDcaMotorA', 'Bot 4 — DCA BTC/ETH', '💰'),
+  settings: loadSettings,
+};
+let currentRoute = null;
+let pollTimer = null;
+
+function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
 function startPolling() {
   stopPolling();
-  summaryTimer = setInterval(() => loadSummary(true), 15_000);
-  tabTimer = setInterval(() => TAB_LOADERS[activeTab](true), 60_000);
-  chartTimer = setInterval(() => loadChart(currentPeriod, true), 60_000);
-}
-function stopPolling() {
-  clearInterval(summaryTimer);
-  clearInterval(tabTimer);
-  clearInterval(chartTimer);
+  pollTimer = setInterval(() => {
+    if (document.hidden) return;
+    const loader = ROUTE_LOADERS[currentRoute];
+    if (loader) loader();
+  }, 20_000);
 }
 
+function applyRoute() {
+  const raw = window.location.hash.replace('#', '');
+  const route = ROUTES.includes(raw) ? raw : 'overview';
+  currentRoute = route;
+  document.querySelectorAll('.nav-item[data-route]').forEach((btn) => btn.classList.toggle('active', btn.dataset.route === route));
+  clearAllCharts();
+  closeSidebar();
+  (ROUTE_LOADERS[route] || loadOverview)();
+  startPolling();
+}
+window.addEventListener('hashchange', applyRoute);
+
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    stopPolling();
-  } else {
-    // Al volver a primer plano se refresca todo una vez de inmediato
-    // (los datos pueden tener minutos de atraso) y recién ahí se retoma el
-    // polling normal — evita ráfagas de timers atrasados apilados por el
-    // navegador mientras la pestaña estaba en background.
-    loadSummary(true);
-    TAB_LOADERS[activeTab](true);
-    if (chart) loadChart(currentPeriod, true);
-    startPolling();
-  }
+  if (document.hidden) { stopPolling(); return; }
+  const loader = ROUTE_LOADERS[currentRoute];
+  if (loader) loader();
+  startPolling();
 });
 
 function init() {
-  loadSummary();
-  TAB_LOADERS[activeTab]();
-  setInterval(tickLastUpdate, 1000);
-  setTimeout(() => loadChart(currentPeriod), 500);
-  startPolling();
+  if (!window.location.hash) window.location.hash = 'overview';
+  else applyRoute();
 }
-
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {

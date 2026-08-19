@@ -8,41 +8,46 @@ HTTPS, y se aloja gratis en GitHub Pages.
 La API **solo tiene endpoints GET**. No expone keys de Binance/Telegram/DB,
 no permite modificar el bot desde la web.
 
-## Secciones (2026-08-16, rediseño completo)
+## Secciones (2026-08-19, rediseño completo: sidebar + vista por bot)
 
-Rediseño de arriba a abajo enfocado en rendimiento móvil (carga lenta, datos
-duplicados, gráfica lenta y bugs al refrescar en celular eran los problemas
-del diseño anterior). 4 secciones:
+Reemplaza el dashboard de tabs (2026-08-16) por una SPA tipo "institutional
+trading terminal": **sidebar fijo** a la izquierda (colapsable con hamburger
+en mobile, `style.css`/`app.js` sin build) + **una página dedicada por
+bot/estrategia** a la derecha, con router por hash (`#overview`, `#motorb`,
+etc.) — cambiar de bot no pega al servidor de más de lo necesario, cada
+página cachea sus propios requests (ver `CACHE_TTL_MS` en `app.js`).
 
-1. **Header fijo** (capital, PnL de hoy, Fear&Greed, estado/modo) — se pinta
-   en menos de 1 segundo, antes que cualquier otra cosa.
-2. **Gráfica de capital** (Lightweight Charts) — carga 500ms DESPUÉS del
-   header/cards (lazy), período default 24H (antes era 1H), máximo 200
-   puntos en pantalla (se promedia si la API devuelve más), sin marcadores
-   de trades individuales.
-3. **3 cards**: HOY (PnL/trades/WR/PF), CAPITAL (total/en trades/libre) e
-   INTELIGENCIA (Ollama en RAM/XGBoost/aprendizajes de hoy) — las 3 salen de
-   un solo request a `/api/dashboard-summary`.
-4. **4 tabs** (Posiciones / Estrategias / Análisis / Sistema) — cambio de tab
-   instantáneo (sin petición), cada tab carga sus datos una sola vez la
-   primera vez que se abre y después se cachea.
+Páginas:
 
-**Caché por tipo de dato** (evita pedir de nuevo antes de que venza): capital
-10s, posiciones 30s, estrategias 60s, análisis diario 30min, sistema 60s.
-Polling de fondo: header/cards cada 15s, tab activa cada 60s, gráfica cada
-60s — se pausa por completo cuando la pestaña del navegador está en segundo
-plano (`visibilitychange`) para no acumular fetches atrasados al volver
-(causa típica de "se bugea al refrescar" en móvil).
+1. **Overview** (`#overview`) — portfolio total + PnL de hoy + gráfica de
+   capital (24H/7D/30D) + 5 cards de rendimiento diario (uno por bot, con
+   sparkline) para Motor B, Motor A, Bot 2 Grid, Bot 3 DCA y Bot 4 DCA. Todo
+   sale de un solo request a `/api/overview`.
+2. **Motor B** (`#motorb`) — Portfolio/Orders/History como sub-tabs, stats de
+   avg profit/trade y max drawdown 24h (`/api/bot/motorb/stats`).
+3. **Motor A DCA** (`#motora`) — el DCA REAL del bot principal (smartDCA,
+   capital real, NO es un bot de competencia) — antes no tenía página propia
+   en el dashboard. Accumulation path BTC/ETH + próximo trigger de compra
+   (`/api/bot/motora/stats`).
+4. **Bot 2 Grid** (`#bot2`) — niveles de grilla BTC/ETH (`/api/bot/grid/
+   levels`) con órdenes BUY/SELL pendientes y el precio actual marcado.
+5. **Bot 3 DCA Agresivo** / **Bot 4 DCA BTC/ETH** (`#bot3`/`#bot4`) —
+   accumulation path + historial de ejecución (`/api/bot/dca/:id/path`, el
+   `:id` se resuelve en runtime vía `/api/competition/ranking`, nunca
+   hardcodeado).
+6. **Settings** (`#settings`) — override de la URL de la API (mismo mecanismo
+   `?api=`/localStorage de siempre) y estado general del bot.
 
-Se eliminaron del inicio (siguen existiendo, pero movidas a una tab o
-directamente retiradas por ser redundantes): distribución de capital
-separada, racha aparte, Market Mood aparte, decisiones autónomas aparte,
-tabla de trades históricos, cooldowns aparte, y los botones de like/compartir
-del diario (ahora solo en la tab Análisis).
+Polling: cada página activa se refresca cada 20s (pausado por completo
+cuando la pestaña está en segundo plano, `visibilitychange`); estado de
+sub-tab/período seleccionado se preserva entre refreshes.
 
-Endpoints nuevos en `src/api/server.js`: `/api/dashboard-summary` (header +
-3 cards en un solo request) y `/api/strategies-today` (tab Estrategias, PF
-real de hoy por estrategia incluyendo capitalDeployer).
+Endpoints nuevos en `src/api/server.js` (2026-08-19): `/api/overview`,
+`/api/bot/motorb/stats`, `/api/bot/grid/levels`, `/api/bot/dca/:id/path`,
+`/api/bot/motora/stats` — todos de solo lectura, reusan `metrics`/`smartDCA`/
+`hybridAllocation` en vez de recalcular. El resto de las páginas reusa
+`/api/competition/bot/:id*` tal cual (con `'motorB'` como id especial para
+Motor B, igual que el tab Competencia del diseño anterior).
 
 ## Arquitectura actual
 

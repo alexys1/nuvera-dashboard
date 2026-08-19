@@ -26,19 +26,36 @@ const fmtPct = (n, digits = 1) => (n === null || n === undefined ? '—' : `${n 
 const pnlClass = (n) => (n === null || n === undefined ? '' : (n >= 0 ? 'pnl-pos' : 'pnl-neg'));
 const esc = (s) => String(s ?? '').replace(/</g, '&lt;');
 
-// ---------- Caché en memoria, TTL por tipo de dato ----------
+// ---------- Caché en memoria, TTL por tipo de dato (2026-08-20, pedido
+// explícito "polling inteligente" — capital/PnL 15s, posiciones abiertas
+// 30s, gráficas 60s, stats generales 60s) ----------
+const CACHE_TTL_CRITICAL = 15_000; // capital, PnL — headers de cada página
+const CACHE_TTL_POSITIONS = 30_000; // posiciones abiertas / niveles de grid
+const CACHE_TTL_CHARTS = 60_000; // gráficas
+const CACHE_TTL_GENERAL = 60_000; // historial de trades, ranking, "path" de DCA
+
 const CACHE_TTL_MS = {
-  '/api/overview': 15_000,
-  '/api/motor-status': 30_000,
-  '/api/bot/motorb/stats': 30_000,
-  '/api/bot/motora/stats': 30_000,
-  '/api/bot/grid/levels': 20_000,
-  '/api/competition/ranking': 60_000,
+  '/api/overview': CACHE_TTL_CRITICAL,
+  '/api/motor-status': CACHE_TTL_CRITICAL,
+  '/api/bot/motorb/stats': CACHE_TTL_CRITICAL,
+  '/api/bot/motora/stats': CACHE_TTL_CRITICAL,
+  '/api/bot/grid/levels': CACHE_TTL_POSITIONS,
+  '/api/competition/ranking': CACHE_TTL_GENERAL,
 };
+// Rutas dinámicas (con :id numérico en el medio) no matchean por string
+// exacto contra CACHE_TTL_MS — se clasifican por el sufijo del path.
+function resolveTtl(path) {
+  const clean = path.split('?')[0];
+  if (CACHE_TTL_MS[clean] !== undefined) return CACHE_TTL_MS[clean];
+  if (/^\/api\/competition\/bot\/[^/]+$/.test(clean)) return CACHE_TTL_CRITICAL; // header del bot (capital/PnL)
+  if (clean.endsWith('/positions')) return CACHE_TTL_POSITIONS;
+  if (clean.endsWith('/chart') || clean === '/api/capital-chart') return CACHE_TTL_CHARTS;
+  return CACHE_TTL_GENERAL; // /trades, /path, etc.
+}
 const cache = new Map();
 
 async function fetchJson(path, { force = false } = {}) {
-  const ttl = CACHE_TTL_MS[path.split('?')[0]] ?? 20_000;
+  const ttl = resolveTtl(path);
   const cached = cache.get(path);
   if (!force && cached && Date.now() - cached.fetchedAt < ttl) return cached.data;
 
@@ -143,6 +160,14 @@ function statusPillHtml(activo) {
   if (activo === false) return '<span class="pill status-inactive"><span class="dot"></span>PAUSADO</span>';
   return '<span class="pill status-active"><span class="dot ok"></span>ACTIVE</span>';
 }
+// Línea "$X invertido · $Y libre" (2026-08-20, pedido explícito: "cuando
+// dinero está en inversión y cuánto está libre de cada bot") — reusada en el
+// header de las 5 páginas individuales.
+function investedFreeHtml(capitalInvertido, capitalLibre) {
+  if (capitalInvertido === undefined || capitalInvertido === null) return '';
+  return `${fmtUsd(capitalInvertido)} invertido · ${fmtUsd(capitalLibre)} libre`;
+}
+const RANK_MEDALS = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
 function fmtDateShort(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -208,20 +233,24 @@ function renderOverviewBots(bots) {
     container.innerHTML = '<div class="empty-state">Sin bots activos.</div>';
     return;
   }
-  container.innerHTML = bots.map((b) => {
+  // bots ya viene ordenado por capital actual descendente (ver /api/overview)
+  // — medallas 🥇🥈🥉4️⃣5️⃣ (2026-08-20, pedido explícito "ranking").
+  container.innerHTML = bots.map((b, i) => {
     const color = b.dailyPnl >= 0 ? '#00ff88' : '#ff4444';
     const pfTxt = b.pfHoy === null || b.pfHoy === undefined ? '—' : (b.pfHoy >= 999 ? '∞' : b.pfHoy.toFixed(2));
     const pfBadge = b.trades > 0 ? (b.pfHoy >= 1.3 ? ' 🌟' : b.pfHoy >= 1.0 ? ' ✅' : ' ⚠️') : '';
+    const medal = RANK_MEDALS[i] || `${i + 1}`;
     return `
       <div class="bot-card" data-bot-route="${b.id}">
         <div class="bc-top">
-          <div class="bc-name">${b.emoji} ${esc(b.nombre)}</div>
+          <div class="bc-name">${medal} ${b.emoji} ${esc(b.nombre)}</div>
           ${b.activo === false ? '<span class="pill status-inactive">Pausado</span>' : ''}
         </div>
         <div class="bc-sub">${esc(b.subtitulo)}</div>
         <div class="bc-row"><span class="label">Daily</span><span class="value ${pnlClass(b.dailyPnl)}">${fmtUsd(b.dailyPnl)}</span></div>
         <div class="bc-row"><span class="label">Trades</span><span class="value">${b.trades}</span></div>
         <div class="bc-row"><span class="label">PF hoy</span><span class="value">${pfTxt}${pfBadge}</span></div>
+        ${b.capitalInvertido !== undefined ? `<div class="bc-row"><span class="label">Capital</span><span class="value">${investedFreeHtml(b.capitalInvertido, b.capitalLibre)}</span></div>` : ''}
         <div class="bc-spark">${sparklineSvg(b.sparkline, color)}</div>
       </div>`;
   }).join('');
@@ -239,11 +268,13 @@ function renderOverviewBots(bots) {
   });
 }
 
-async function loadOverview() {
+// renderOverviewSkeleton (2026-08-20, arreglo de parpadeo — pedido
+// explícito): construye el HTML de la página UNA sola vez, al entrar a la
+// ruta. refreshOverview() se llama en cada poll y SOLO actualiza texto de
+// elementos existentes — nunca vuelve a tocar $('content').innerHTML, así
+// que no hay parpadeo ni reseteo de scroll en el polling silencioso.
+function renderOverviewSkeleton() {
   $('content').innerHTML = overviewSkeleton();
-  // Sincroniza el botón de período activo con ovCurrentPeriod — el polling
-  // de 20s reconstruye este HTML entero, así que sin esto el botón activo
-  // "resetearía" a 7D visualmente aunque el usuario hubiera elegido otro.
   $('ovPeriodSelector').querySelectorAll('.period-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.period === ovCurrentPeriod);
     btn.addEventListener('click', () => {
@@ -254,7 +285,9 @@ async function loadOverview() {
       loadOverviewChart(ovCurrentPeriod, true);
     });
   });
+}
 
+async function refreshOverview() {
   try {
     const data = await fetchJson('/api/overview');
     $('ovCapital').textContent = fmtUsd(data.capitalTotal);
@@ -285,6 +318,7 @@ function motorBSkeleton() {
     <div class="bot-page-header">
       <div class="bph-title">🔄 Motor B — Scalping Selectivo <span id="mbStatusPill"></span></div>
       <div class="bph-capital"><span id="mbCapital">—</span> <span id="mbPct" class="pct"></span> ${modePillHtml('paper')}</div>
+      <div class="stat-sub" id="mbInvestedFree"></div>
     </div>
 
     <div class="subnav" id="mbSubnav">
@@ -402,13 +436,14 @@ function wireSubnav(navId, onSwitch) {
 
 const mbLoadedOnce = new Set();
 let mbActiveSub = 'portfolio';
-async function loadMotorB() {
+// renderMotorBSkeleton/refreshMotorB (2026-08-20, arreglo de parpadeo): el
+// comentario original sobre "el polling reconstruye este HTML entero" ya no
+// aplica — el skeleton se construye una sola vez por visita a la ruta, el
+// polling solo llama a refreshMotorB(). El sync de sub-tab activo se
+// mantiene igual (sigue haciendo falta al entrar/volver a la ruta).
+function renderMotorBSkeleton() {
   $('content').innerHTML = motorBSkeleton();
 
-  // Sincroniza sub-tab y período activos con el estado guardado — el
-  // polling de 20s reconstruye este HTML entero (ver applyRoute), así que
-  // sin esto el usuario mirando "Orders"/"History" se vería "devuelto" a
-  // Portfolio en cada refresh (bug real, encontrado en revisión).
   $('mbSubnav').querySelectorAll('.subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.sub === mbActiveSub));
   document.querySelectorAll('.subnav-panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === mbActiveSub));
 
@@ -433,7 +468,9 @@ async function loadMotorB() {
   // pedir sus datos ahora mismo si venimos de un refresh en Orders/History.
   if (mbActiveSub === 'orders') { mbLoadedOnce.add('orders'); loadMotorBOrders(); }
   if (mbActiveSub === 'history') { mbLoadedOnce.add('history'); loadMotorBHistory(); }
+}
 
+async function refreshMotorB() {
   try {
     const [bot, stats] = await Promise.all([
       fetchJson('/api/competition/bot/motorB'),
@@ -444,6 +481,7 @@ async function loadMotorB() {
     const pctEl = $('mbPct');
     pctEl.textContent = fmtPct(bot.pnlPct);
     pctEl.className = `pct ${pnlClass(bot.pnlPct)}`;
+    $('mbInvestedFree').textContent = investedFreeHtml(bot.capitalInvertido, bot.capitalLibre);
 
     $('mbAvgProfit').innerHTML = `<span class="${pnlClass(stats.avgProfitPerTradeUsd)}">${fmtUsd(stats.avgProfitPerTradeUsd)}</span>`;
     $('mbAvgProfit').insertAdjacentHTML('beforeend', `<div class="stat-sub">${fmtPct(stats.avgProfitPerTradePct, 3)}</div>`);
@@ -454,6 +492,8 @@ async function loadMotorB() {
     $('mbStatRow').innerHTML = '<div class="empty-state">No se pudo cargar el estado de Motor B.</div>';
   }
   loadMotorBChart(mbPeriod);
+  if (mbActiveSub === 'orders') loadMotorBOrders();
+  if (mbActiveSub === 'history') loadMotorBHistory();
 }
 async function loadMotorBOrders() {
   try {
@@ -498,9 +538,11 @@ function motorASkeleton() {
   return `
     <div class="bot-page-header">
       <div class="bph-title">💛 Motor A — DCA BTC/ETH <span id="maStatusPill"></span></div>
-      <div class="stat-sub">Parte del bot principal (smartDCA) — no es competencia, capital real del bot.</div>
+      <div class="stat-sub">Capital 100% propio ($1,000), independiente de Motor B.</div>
       <div class="bph-capital"><span id="maCapital">—</span> ${modePillHtml('paper')}</div>
+      <div class="stat-sub" id="maInvestedFree"></div>
     </div>
+    <div id="maErrorBanner"></div>
 
     <div class="stat-row">
       <div class="stat-box"><div class="stat-label">Profit Factor (7d)</div><div class="stat-value" id="maPf">—</div></div>
@@ -533,12 +575,16 @@ function motorASkeleton() {
   `;
 }
 
-async function loadMotorA() {
+function renderMotorASkeleton() {
   $('content').innerHTML = motorASkeleton();
+}
+
+async function refreshMotorA() {
   try {
     const data = await fetchJson('/api/bot/motora/stats');
     $('maStatusPill').innerHTML = statusPillHtml(data.activo);
     $('maCapital').textContent = fmtUsd(data.capitalAsignado);
+    $('maInvestedFree').textContent = investedFreeHtml(data.capitalInvertido, data.capitalLibre);
     $('maPf').textContent = data.pf7d >= 999 ? '∞' : data.pf7d;
     $('maWr').textContent = `${data.winrate7d}%`;
     $('maTrades').textContent = `${data.tradesHoy} / ${data.trades7d}`;
@@ -559,8 +605,11 @@ async function loadMotorA() {
       <div class="kv-row"><span class="label">Timeout</span><span class="value">${data.config.timeoutHoras}h</span></div>`;
 
     $('maHistory').innerHTML = tradesTableHtml(data.historial.filter((t) => t.outcome !== 'open'));
+    $('maErrorBanner').innerHTML = '';
   } catch (err) {
-    $('content').querySelector('.two-col')?.insertAdjacentHTML('beforebegin', '<div class="empty-state">No se pudo cargar Motor A.</div>');
+    // Contenedor dedicado (2026-08-20, mismo criterio que Bot 2) — evita
+    // acumular un mensaje de error por cada poll fallido.
+    $('maErrorBanner').innerHTML = '<div class="empty-state">No se pudo cargar Motor A.</div>';
   }
 }
 
@@ -599,7 +648,9 @@ function bot2Skeleton() {
     <div class="bot-page-header">
       <div class="bph-title">📐 Bot 2 — Grid BTC/ETH <span id="b2StatusPill"></span></div>
       <div class="bph-capital"><span id="b2Capital">—</span> <span id="b2Pct" class="pct"></span> ${modePillHtml('paper')}</div>
+      <div class="stat-sub" id="b2InvestedFree"></div>
     </div>
+    <div id="b2ErrorBanner"></div>
     <div class="stat-row">
       <div class="stat-box"><div class="stat-label">Grid Profit</div><div class="stat-value" id="b2GridProfit">—</div></div>
       <div class="stat-box"><div class="stat-label">Floating PnL</div><div class="stat-value" id="b2Floating">—</div></div>
@@ -616,8 +667,11 @@ function bot2Skeleton() {
   `;
 }
 
-async function loadBot2() {
+function renderBot2Skeleton() {
   $('content').innerHTML = bot2Skeleton();
+}
+
+async function refreshBot2() {
   try {
     const id = await getBotIdByEstrategia('competitionGrid');
     if (id === null) throw new Error('bot no encontrado');
@@ -628,6 +682,7 @@ async function loadBot2() {
     ]);
     $('b2StatusPill').innerHTML = statusPillHtml(bot.activo);
     $('b2Capital').textContent = fmtUsd(bot.capitalActual);
+    $('b2InvestedFree').textContent = investedFreeHtml(bot.capitalInvertido, bot.capitalLibre);
     const pctEl = $('b2Pct');
     pctEl.textContent = fmtPct(bot.pnlPct);
     pctEl.className = `pct ${pnlClass(bot.pnlPct)}`;
@@ -647,8 +702,12 @@ async function loadBot2() {
 
     $('b2BtcTable').innerHTML = gridLevelsTable('BTC/USDT', levels['BTC/USDT']);
     $('b2EthTable').innerHTML = gridLevelsTable('ETH/USDT', levels['ETH/USDT']);
+    $('b2ErrorBanner').innerHTML = '';
   } catch (err) {
-    $('content').innerHTML += '<div class="empty-state">No se pudo cargar Bot 2 — Grid.</div>';
+    // Contenedor dedicado (2026-08-20) en vez de `content.innerHTML +=`: con
+    // el refresh corriendo cada 15s, appendear sin límite habría acumulado
+    // un mensaje de error por cada poll fallido.
+    $('b2ErrorBanner').innerHTML = '<div class="empty-state">No se pudo cargar Bot 2 — Grid.</div>';
   }
 }
 
@@ -660,7 +719,9 @@ function dcaBotSkeleton(title, emoji) {
     <div class="bot-page-header">
       <div class="bph-title">${emoji} ${esc(title)} <span id="dcaStatusPill"></span></div>
       <div class="bph-capital"><span id="dcaCapital">—</span> <span id="dcaPct" class="pct"></span> ${modePillHtml('paper')}</div>
+      <div class="stat-sub" id="dcaInvestedFree"></div>
     </div>
+    <div id="dcaErrorBanner"></div>
     <div class="stat-row">
       <div class="stat-box"><div class="stat-label">PnL total</div><div class="stat-value" id="dcaPnl">—</div></div>
       <div class="stat-box"><div class="stat-label">Winrate (7d)</div><div class="stat-value" id="dcaWr">—</div></div>
@@ -683,8 +744,11 @@ function dcaBotSkeleton(title, emoji) {
   `;
 }
 
-async function loadDcaBotPage(estrategia, title, emoji) {
+function renderDcaBotSkeleton(title, emoji) {
   $('content').innerHTML = dcaBotSkeleton(title, emoji);
+}
+
+async function refreshDcaBotPage(estrategia) {
   try {
     const id = await getBotIdByEstrategia(estrategia);
     if (id === null) throw new Error('bot no encontrado');
@@ -695,6 +759,7 @@ async function loadDcaBotPage(estrategia, title, emoji) {
     ]);
     $('dcaStatusPill').innerHTML = statusPillHtml(bot.activo);
     $('dcaCapital').textContent = fmtUsd(bot.capitalActual);
+    $('dcaInvestedFree').textContent = investedFreeHtml(bot.capitalInvertido, bot.capitalLibre);
     const pctEl = $('dcaPct');
     pctEl.textContent = fmtPct(bot.pnlPct);
     pctEl.className = `pct ${pnlClass(bot.pnlPct)}`;
@@ -716,8 +781,10 @@ async function loadDcaBotPage(estrategia, title, emoji) {
 
     const closed = trades.filter((t) => t.outcome !== 'open');
     $('dcaHistory').innerHTML = tradesTableHtml(closed);
+    $('dcaErrorBanner').innerHTML = '';
   } catch (err) {
-    $('content').innerHTML += `<div class="empty-state">No se pudo cargar ${esc(title)}.</div>`;
+    // Contenedor dedicado (2026-08-20, mismo criterio que Bot 2/Motor A).
+    $('dcaErrorBanner').innerHTML = '<div class="empty-state">No se pudo cargar la información del bot.</div>';
   }
 }
 
@@ -751,7 +818,12 @@ function settingsSkeleton() {
   `;
 }
 
-async function loadSettings() {
+// renderSettingsSkeleton/refreshSettings (2026-08-20, arreglo de parpadeo):
+// además del parpadeo, el bug original era peor acá — reconstruir el HTML en
+// cada poll pisaba <input id="apiBaseInput"> con su valor original, borrando
+// lo que el usuario estuviera escribiendo. Separar skeleton/refresh lo
+// arregla gratis (refreshSettings nunca toca el input).
+function renderSettingsSkeleton() {
   $('content').innerHTML = settingsSkeleton();
   $('apiBaseSave').addEventListener('click', () => {
     const val = $('apiBaseInput').value.trim();
@@ -760,6 +832,9 @@ async function loadSettings() {
     url.searchParams.set('api', val);
     window.location.href = url.toString();
   });
+}
+
+async function refreshSettings() {
   try {
     const data = await fetchJson('/api/overview');
     $('setStatus').innerHTML = `
@@ -776,26 +851,48 @@ async function loadSettings() {
 // ROUTER
 // =========================================================================
 const ROUTES = ['overview', 'motorb', 'motora', 'bot2', 'bot3', 'bot4', 'settings'];
-const ROUTE_LOADERS = {
-  overview: loadOverview,
-  motorb: loadMotorB,
-  motora: loadMotorA,
-  bot2: loadBot2,
-  bot3: () => loadDcaBotPage('competitionDca', 'Bot 3 — DCA Agresivo', '📈'),
-  bot4: () => loadDcaBotPage('competitionDcaMotorA', 'Bot 4 — DCA BTC/ETH', '💰'),
-  settings: loadSettings,
+// RENDER = construye el HTML de la página (skeleton), UNA sola vez por
+// visita a la ruta. REFRESH = pide datos frescos y actualiza SOLO texto/
+// clases de elementos ya existentes — es lo único que corre en cada poll
+// (2026-08-20, arreglo de parpadeo/scroll, pedido explícito: "actualizar
+// solo los valores sin recargar nada visual"). Nunca reemplaza
+// $('content').innerHTML fuera de RENDER, así que no hay parpadeo ni salto
+// de scroll en el polling silencioso.
+const ROUTE_RENDER = {
+  overview: renderOverviewSkeleton,
+  motorb: renderMotorBSkeleton,
+  motora: renderMotorASkeleton,
+  bot2: renderBot2Skeleton,
+  bot3: () => renderDcaBotSkeleton('Bot 3 — DCA Agresivo', '📈'),
+  bot4: () => renderDcaBotSkeleton('Bot 4 — DCA BTC/ETH', '💰'),
+  settings: renderSettingsSkeleton,
+};
+const ROUTE_REFRESH = {
+  overview: refreshOverview,
+  motorb: refreshMotorB,
+  motora: refreshMotorA,
+  bot2: refreshBot2,
+  bot3: () => refreshDcaBotPage('competitionDca'),
+  bot4: () => refreshDcaBotPage('competitionDcaMotorA'),
+  settings: refreshSettings,
 };
 let currentRoute = null;
 let pollTimer = null;
 
 function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
+// Intervalo base 15s (2026-08-20, pedido explícito "datos críticos cada
+// 15s") — las llamadas a datos menos urgentes (posiciones 30s, gráficas/
+// historial 60s) no necesitan un setInterval propio: fetchJson ya cachea por
+// endpoint con su propio TTL (ver resolveTtl arriba), así que aunque
+// refresh() se llame cada 15s, la red solo se golpea con la frecuencia real
+// de cada tipo de dato — mismo resultado, menos código.
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(() => {
     if (document.hidden) return;
-    const loader = ROUTE_LOADERS[currentRoute];
-    if (loader) loader();
-  }, 20_000);
+    const refresh = ROUTE_REFRESH[currentRoute];
+    if (refresh) refresh();
+  }, 15_000);
 }
 
 function applyRoute() {
@@ -805,15 +902,18 @@ function applyRoute() {
   document.querySelectorAll('.nav-item[data-route]').forEach((btn) => btn.classList.toggle('active', btn.dataset.route === route));
   clearAllCharts();
   closeSidebar();
-  (ROUTE_LOADERS[route] || loadOverview)();
+  (ROUTE_RENDER[route] || renderOverviewSkeleton)();
+  (ROUTE_REFRESH[route] || refreshOverview)();
   startPolling();
 }
 window.addEventListener('hashchange', applyRoute);
 
+// Al volver a la pestaña: solo refresh (sin reconstruir el skeleton), así
+// que tampoco pierde scroll acá.
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { stopPolling(); return; }
-  const loader = ROUTE_LOADERS[currentRoute];
-  if (loader) loader();
+  const refresh = ROUTE_REFRESH[currentRoute];
+  if (refresh) refresh();
   startPolling();
 });
 

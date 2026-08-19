@@ -611,10 +611,15 @@ async function loadSistema(force = false) {
   }
 }
 
-// ---------- Competencia de estrategias (2026-08-19, FASE 2/3, pedido
-// explícito) — Bot 2 (Grid BTC/ETH) y Bot 3 (DCA Agresivo), paper trading
-// paralelo con capital PROPIO ($1,000 c/u), separado del bot principal.
-// Consume /api/competition/* (ver src/api/server.js).
+// ---------- Competencia de estrategias (2026-08-19, FASE 2/3 + TAREA 1,
+// pedido explícito) — Motor B (bot principal, id especial 'motorB') + Bot 2
+// (Grid BTC/ETH) + Bot 3 (DCA Agresivo) + Bot 4 (DCA BTC/ETH, Motor A
+// aislado), cada uno con página completa (header, gráfica, stats,
+// posiciones con PnL en vivo, historial, ranking). Consume
+// /api/competition/* (ver src/api/server.js). competenciaSelectedBotId es
+// SIEMPRE string (los ids de bot_instances vienen como número en el JSON,
+// 'motorB' es string — se normaliza a String() en todos lados para poder
+// comparar contra btn.dataset.botId, que el DOM siempre da como string).
 let competenciaSelectedBotId = null;
 let competenciaChart = null;
 let competenciaChartSeries = null;
@@ -626,6 +631,24 @@ function medalFor(posicion) {
   return `${posicion}️⃣`;
 }
 
+function iconForEstrategia(estrategia) {
+  const icons = { selectiveScalping: '🤖', competitionGrid: '📊', competitionDca: '📈', competitionDcaMotorA: '💰' };
+  return icons[estrategia] || '🏅';
+}
+
+// Etiqueta corta del selector (pedido explícito: "Bot 2 Grid", "Bot 3 DCA",
+// "Bot 4 DCA BTC/ETH") — mantiene el número del bot pero saca el "— Nombre
+// largo" completo.
+function shortLabelForBot(bot) {
+  if (bot.id === 'motorB') return 'Motor B';
+  const prefixMatch = bot.nombre.match(/^(Bot \d+)/);
+  const prefix = prefixMatch ? prefixMatch[1] : bot.nombre;
+  if (bot.estrategia === 'competitionGrid') return `${prefix} Grid`;
+  if (bot.estrategia === 'competitionDca') return `${prefix} DCA`;
+  if (bot.estrategia === 'competitionDcaMotorA') return `${prefix} DCA BTC/ETH`;
+  return bot.nombre;
+}
+
 function renderCompetenciaRanking(ranking) {
   const container = $('competenciaRanking');
   if (!ranking || ranking.length === 0) {
@@ -635,52 +658,87 @@ function renderCompetenciaRanking(ranking) {
   container.innerHTML = ranking.map((r) => `
     <div class="ranking-row">
       <span class="medal">${medalFor(r.posicion)}</span>
-      <span class="nombre">${r.nombre}</span>
+      <span class="nombre">${iconForEstrategia(r.estrategia)} ${r.nombre}</span>
       <span class="capital ${pnlClass(r.pnl)}">${fmtUsd(r.capitalActual)} (${fmtPct(r.pnlPct)})</span>
     </div>`).join('');
 }
 
+// Orden fijo del selector (pedido explícito: "[Motor B] [Bot 2] [Bot 3] [Bot
+// 4]") — DISTINTO del orden del ranking (que va por capital actual).
+function ordenSelector(ranking) {
+  return [...ranking].sort((a, b) => {
+    if (a.id === 'motorB') return -1;
+    if (b.id === 'motorB') return 1;
+    return a.id - b.id;
+  });
+}
+
 function renderCompetenciaSelector(ranking) {
   const container = $('competenciaBotSelector');
-  container.innerHTML = ranking.map((r) => `<button class="bot-selector-btn${r.id === competenciaSelectedBotId ? ' active' : ''}" data-bot-id="${r.id}">${r.nombre.replace(/^Bot \d+ — /, '')}</button>`).join('');
+  const ordered = ordenSelector(ranking);
+  container.innerHTML = ordered.map((r) => `<button class="bot-selector-btn${String(r.id) === competenciaSelectedBotId ? ' active' : ''}" data-bot-id="${r.id}">${iconForEstrategia(r.estrategia)} ${shortLabelForBot(r)}</button>`).join('');
   container.querySelectorAll('.bot-selector-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      if (parseInt(btn.dataset.botId, 10) === competenciaSelectedBotId) return;
-      competenciaSelectedBotId = parseInt(btn.dataset.botId, 10);
+      if (btn.dataset.botId === competenciaSelectedBotId) return;
+      competenciaSelectedBotId = btn.dataset.botId;
       container.querySelectorAll('.bot-selector-btn').forEach((b) => b.classList.toggle('active', b === btn));
       loadCompetenciaDetail(true);
     });
   });
 }
 
-function renderCompetenciaDetail(bot) {
-  const container = $('competenciaDetail');
+function renderCompetenciaHeader(bot) {
+  const container = $('competenciaHeader');
   if (!bot) {
     container.innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
     return;
   }
-  const pfTxt = bot.profitFactor7d >= 999 ? '∞' : (bot.profitFactor7d ?? '—');
-  const posiciones = bot.posicionesAbiertas || [];
   container.innerHTML = `
-    <div class="strat-card">
-      <div class="strat-header"><span>${bot.nombre}</span>${bot.activo === false ? '<span>⏸️ Pausado</span>' : ''}</div>
-      <div class="strat-line">Capital: <span class="hl ${pnlClass(bot.pnl)}">${fmtUsd(bot.capitalActual)} (${fmtPct(bot.pnlPct)})</span></div>
-      <div class="strat-line">WR (7 días): <span class="hl">${bot.winrate7d ?? 0}%</span> | PF (7 días): <span class="hl">${pfTxt}</span></div>
-      <div class="strat-line">Trades hoy: <span class="hl">${bot.tradesHoy}</span> | Trades (7 días): <span class="hl">${bot.trades7d}</span></div>
-      <div class="strat-line" style="margin-top:6px">${posiciones.length === 0 ? 'Sin posiciones abiertas.' : `Posiciones abiertas: ${posiciones.map((p) => `${p.pair.replace('/USDT', '')} $${p.sizeUsdt}`).join(', ')}`}</div>
-    </div>`;
+    <div class="strat-header"><span>${iconForEstrategia(bot.estrategia)} ${bot.nombre}</span>${bot.activo === false ? '<span>⏸️ Pausado</span>' : ''}</div>
+    <div class="strat-line">Capital: <span class="hl">${fmtUsd(bot.capitalActual)}</span> | PnL: <span class="hl ${pnlClass(bot.pnl)}">${fmtUsd(bot.pnl)} (${fmtPct(bot.pnlPct)})</span></div>`;
 }
 
-function renderCompetenciaTrades(trades) {
-  const container = $('competenciaTradesList');
-  if (!trades || trades.length === 0) {
-    container.innerHTML = '<div class="empty-state">Sin trades todavía.</div>';
+function renderCompetenciaStats(bot, trades) {
+  const container = $('competenciaStats');
+  if (!bot) {
+    container.innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
     return;
   }
-  container.innerHTML = trades.map((t) => {
+  const cerrados = (trades || []).filter((t) => t.outcome !== 'open');
+  const mejorTrade = cerrados.length > 0 ? cerrados.reduce((best, t) => (t.pnl > best.pnl ? t : best)) : null;
+  const pfTxt = bot.profitFactor7d >= 999 ? '∞' : (bot.profitFactor7d ?? '—');
+  const abiertos = (bot.posicionesAbiertas || []).length;
+  container.innerHTML = `
+    <div class="strat-line">Trades: <span class="hl">${abiertos} abierto${abiertos === 1 ? '' : 's'}</span> | <span class="hl">${bot.trades7d} cerrado${bot.trades7d === 1 ? '' : 's'} (7 días)</span> | <span class="hl">${bot.tradesHoy} hoy</span></div>
+    <div class="strat-line">WR (7 días): <span class="hl">${bot.winrate7d ?? 0}%</span> | PF (7 días): <span class="hl">${pfTxt}</span></div>
+    <div class="strat-line">Mejor trade: <span class="hl ${mejorTrade ? pnlClass(mejorTrade.pnl) : ''}">${mejorTrade ? `${mejorTrade.pair.replace('/USDT', '')} ${fmtUsd(mejorTrade.pnl)}` : '—'}</span></div>`;
+}
+
+function renderCompetenciaPositions(positions) {
+  const container = $('competenciaPosiciones');
+  if (!positions || positions.length === 0) {
+    container.innerHTML = '<div class="empty-state">Sin posiciones abiertas.</div>';
+    return;
+  }
+  container.innerHTML = positions.map((p) => {
+    const sym = p.pair.replace('/USDT', '');
+    return `<div class="strat-line">${sym} <span class="hl">${fmtUsd(p.sizeUsdt)}</span> @ ${p.entryPrice} → ${p.currentPrice ?? '—'} | <span class="${pnlClass(p.pnlActual)}">${fmtPct(p.pnlPct)} (${fmtUsd(p.pnlActual)})</span> | ${p.tiempoAbierto}</div>`;
+  }).join('');
+}
+
+// Historial (pedido explícito: "Tabla con wins/losses y PnL") — solo trades
+// CERRADOS, las abiertas ya se ven en el bloque de posiciones de arriba.
+function renderCompetenciaTrades(trades) {
+  const container = $('competenciaTradesList');
+  const cerrados = (trades || []).filter((t) => t.outcome !== 'open');
+  if (cerrados.length === 0) {
+    container.innerHTML = '<div class="empty-state">Sin trades cerrados todavía.</div>';
+    return;
+  }
+  container.innerHTML = cerrados.map((t) => {
     const sym = t.pair.replace('/USDT', '');
-    if (t.outcome === 'open') return `<div class="strat-line">${sym}: abierto @ $${t.entryPrice} ($${t.sizeUsdt})</div>`;
-    return `<div class="strat-line">${sym} <span class="${pnlClass(t.pnl)}">${t.outcome === 'win' ? 'WIN' : 'LOSS'} ${fmtUsd(t.pnl)}</span></div>`;
+    const fecha = t.closedAt ? new Date(t.closedAt).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+    return `<div class="strat-line">${sym} <span class="${pnlClass(t.pnl)}">${t.outcome === 'win' ? 'WIN' : 'LOSS'} ${fmtUsd(t.pnl)}</span> · ${fecha}</div>`;
   }).join('');
 }
 
@@ -727,25 +785,34 @@ async function loadCompetenciaChart(botId, force = false) {
 async function loadCompetenciaDetail(force = false) {
   if (!competenciaSelectedBotId) return;
   try {
-    const [bot, trades] = await Promise.all([
+    // limit=50 (no 10): renderCompetenciaStats calcula "mejor trade" sobre
+    // esta misma lista — con pocos trades cargados el mejor trade real
+    // podría no estar entre los últimos 10.
+    const [bot, trades, positions] = await Promise.all([
       fetchJson(`/api/competition/bot/${competenciaSelectedBotId}`, { force }),
-      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}/trades?limit=10`, { force }),
+      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}/trades?limit=50`, { force }),
+      fetchJson(`/api/competition/bot/${competenciaSelectedBotId}/positions`, { force }),
     ]);
-    renderCompetenciaDetail(bot);
+    renderCompetenciaHeader(bot);
+    renderCompetenciaStats(bot, trades);
+    renderCompetenciaPositions(positions);
     renderCompetenciaTrades(trades);
     await loadCompetenciaChart(competenciaSelectedBotId, force);
   } catch (err) {
-    $('competenciaDetail').innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
+    $('competenciaHeader').innerHTML = '<div class="empty-state">No se pudo cargar este bot.</div>';
   }
 }
 
 async function loadCompetencia(force = false) {
   try {
     const ranking = await fetchJson('/api/competition/ranking', { force });
-    $('competenciaSubtitulo').textContent = `${ranking.length} estrategias en paper trading | Capital inicial: $1,000 c/u`;
+    $('competenciaSubtitulo').textContent = `${ranking.length} bots en paper trading | Motor B usa su % del capital real del bot principal, los demás $1,000 propios c/u`;
     renderCompetenciaRanking(ranking);
     renderCompetenciaSelector(ranking);
-    if (!competenciaSelectedBotId && ranking.length > 0) competenciaSelectedBotId = ranking[0].id;
+    if (!competenciaSelectedBotId) {
+      const ordered = ordenSelector(ranking);
+      competenciaSelectedBotId = ordered.length > 0 ? String(ordered[0].id) : null;
+    }
     await loadCompetenciaDetail(force);
   } catch (err) {
     $('competenciaSubtitulo').textContent = 'No se pudo cargar la competencia.';

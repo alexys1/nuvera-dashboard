@@ -521,30 +521,48 @@
       <div id="sistemaContent"><div class="empty-state skeleton">Cargando…</div></div>
     </div>
 
-    <!-- Competencia de estrategias (2026-08-19, FASE 2/3, pedido explícito):
-    Bot 2 (Grid BTC/ETH) y Bot 3 (DCA Agresivo) en paper trading paralelo,
-    capital propio de $1,000 c/u — ver src/api/server.js /api/competition/*
-    y src/strategies/competitionGrid.js/competitionDca.js del bot. -->
+    <!-- Competencia de estrategias (2026-08-19, FASE 2/3 + TAREA 1, pedido
+    explícito): Motor B (bot principal) + Bot 2 (Grid BTC/ETH) + Bot 3 (DCA
+    Agresivo) + Bot 4 (DCA BTC/ETH, Motor A aislado) — página completa por
+    bot (header, gráfica, stats, posiciones abiertas, historial, ranking) —
+    ver src/api/server.js /api/competition/* y src/strategies/
+    competitionGrid.js/competitionDca.js/competitionDcaMotorA.js del bot. -->
     <div class="tab-panel" id="tab-competencia">
-      <div class="strat-card">
-        <div class="strat-header"><span>🏆 COMPETENCIA DE ESTRATEGIAS</span></div>
-        <div class="strat-line" id="competenciaSubtitulo">Cargando…</div>
-      </div>
+      <div class="strat-line" id="competenciaSubtitulo" style="margin-bottom:10px">Cargando…</div>
 
       <div class="subtabs-nav" id="competenciaBotSelector"></div>
 
-      <div id="competenciaDetail"><div class="empty-state skeleton">Cargando…</div></div>
+      <!-- Header: nombre + capital + PnL -->
+      <div class="strat-card" id="competenciaHeader"><div class="empty-state skeleton">Cargando…</div></div>
 
-      <div id="competenciaChartContainer" style="display:none;"></div>
-      <div class="empty-state" id="competenciaChartPlaceholder" style="display:none;"></div>
-
+      <!-- Gráfica de capital -->
       <div class="strat-card">
-        <div class="strat-header"><span>Trades recientes</span></div>
+        <div class="strat-header"><span>Capital — últimos 7 días</span></div>
+        <div id="competenciaChartContainer" style="display:none;"></div>
+        <div class="empty-state" id="competenciaChartPlaceholder" style="display:none;"></div>
+      </div>
+
+      <!-- Stats -->
+      <div class="strat-card">
+        <div class="strat-header"><span>Stats</span></div>
+        <div id="competenciaStats"><div class="empty-state">Cargando…</div></div>
+      </div>
+
+      <!-- Posiciones abiertas (PnL en vivo vs Binance) -->
+      <div class="strat-card">
+        <div class="strat-header"><span>Posiciones abiertas</span></div>
+        <div class="row-list" id="competenciaPosiciones"><div class="empty-state">Sin datos.</div></div>
+      </div>
+
+      <!-- Historial de trades -->
+      <div class="strat-card">
+        <div class="strat-header"><span>Historial de trades</span></div>
         <div class="row-list" id="competenciaTradesList"><div class="empty-state">Sin datos.</div></div>
       </div>
 
+      <!-- Ranking vs otros bots -->
       <div class="strat-card">
-        <div class="strat-header"><span>RANKING ACTUAL</span></div>
+        <div class="strat-header"><span>Ranking vs otros bots</span></div>
         <div id="competenciaRanking"><div class="empty-state">Sin datos.</div></div>
       </div>
     </div>

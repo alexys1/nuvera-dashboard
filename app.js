@@ -857,12 +857,23 @@ function renderDcaHistoryIncremental(closed) {
 // gráfica" pide evitar).
 async function loadDcaChart(id, days, force = false) {
   try {
-    const raw = await fetchJson(`/api/competition/bot/${id}/chart?days=${days}`, { force });
+    let raw = await fetchJson(`/api/competition/bot/${id}/chart?days=${days}`, { force });
     if (!raw || raw.length === 0) {
       $('dcaChartPlaceholder').style.display = 'flex';
       $('dcaChartPlaceholder').textContent = 'Sin historial de capital todavía (sin trades cerrados).';
       return;
     }
+    // No mezclar capital PAPER de antes de pasar a MODE=live con el capital
+    // REAL de después (2026-08-22, pedido explícito: "el gráfico arranca en
+    // mil tantos en vez de $65.11") — mismo criterio que ya usa el gráfico
+    // de Overview (ver resolveBot4LiveChartScope en server.js), pero acá se
+    // resuelve en el cliente: este endpoint genérico
+    // (getBotInstanceCapitalHistory) no filtra por 'live_start', así que se
+    // corta el array en el último evento 'live_start' que ya viene en la
+    // respuesta (eventType por fila). No aplica (no-op) para bots que nunca
+    // pasaron a live, como Bot 3.
+    const liveStartIdx = raw.map((p) => p.eventType).lastIndexOf('live_start');
+    if (liveStartIdx !== -1) raw = raw.slice(liveStartIdx);
     const points = raw
       .map((p) => ({ time: Math.floor(new Date(p.timestamp).getTime() / 1000), value: p.capital }))
       .sort((a, b) => a.time - b.time);

@@ -718,10 +718,11 @@ function dcaBotSkeleton(title, emoji) {
   return `
     <div class="bot-page-header">
       <div class="bph-title">${emoji} ${esc(title)} <span id="dcaStatusPill"></span></div>
-      <div class="bph-capital"><span id="dcaCapital">—</span> <span id="dcaPct" class="pct"></span> ${modePillHtml('paper')}</div>
+      <div class="bph-capital"><span id="dcaCapital">—</span> <span id="dcaPct" class="pct"></span> <span id="dcaModePill">${modePillHtml('paper')}</span></div>
       <div class="stat-sub" id="dcaInvestedFree"></div>
     </div>
     <div id="dcaErrorBanner"></div>
+    <div id="dcaRealBalancePanel"></div>
     <div class="stat-row">
       <div class="stat-box"><div class="stat-label">PnL total</div><div class="stat-value" id="dcaPnl">—</div></div>
       <div class="stat-box"><div class="stat-label">Winrate (7d)</div><div class="stat-value" id="dcaWr">—</div></div>
@@ -750,25 +751,40 @@ function renderDcaBotSkeleton(title, emoji) {
 
 async function refreshDcaBotPage(estrategia) {
   try {
+    const isBot4 = estrategia === 'competitionDcaMotorA';
     const id = await getBotIdByEstrategia(estrategia);
     if (id === null) throw new Error('bot no encontrado');
-    const [bot, trades, path] = await Promise.all([
+    const [bot, trades, path, real] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson(`/api/competition/bot/${id}/trades?limit=50`),
       fetchJson(`/api/bot/dca/${id}/path`),
+      isBot4 ? fetchJson('/api/bot/4/balance-real').catch(() => null) : Promise.resolve(null),
     ]);
     $('dcaStatusPill').innerHTML = statusPillHtml(bot.activo);
-    $('dcaCapital').textContent = fmtUsd(bot.capitalActual);
+    $('dcaModePill').innerHTML = modePillHtml(real && real.live ? 'live' : 'paper');
+    $('dcaCapital').textContent = fmtUsd(real && real.live ? real.capitalRealTotal : bot.capitalActual);
     $('dcaInvestedFree').textContent = investedFreeHtml(bot.capitalInvertido, bot.capitalLibre);
     const pctEl = $('dcaPct');
-    pctEl.textContent = fmtPct(bot.pnlPct);
-    pctEl.className = `pct ${pnlClass(bot.pnlPct)}`;
+    pctEl.textContent = fmtPct(real && real.live ? real.pnlPct : bot.pnlPct);
+    pctEl.className = `pct ${pnlClass(real && real.live ? real.pnlPct : bot.pnlPct)}`;
 
     const pnlEl = $('dcaPnl');
-    pnlEl.textContent = fmtUsd(bot.pnl);
-    pnlEl.className = `stat-value ${pnlClass(bot.pnl)}`;
+    pnlEl.textContent = fmtUsd(real && real.live ? real.pnlUsd : bot.pnl);
+    pnlEl.className = `stat-value ${pnlClass(real && real.live ? real.pnlUsd : bot.pnl)}`;
     $('dcaWr').textContent = `${bot.winrate7d}%`;
     $('dcaTrades').textContent = `${bot.tradesHoy} / ${bot.trades7d}`;
+
+    // Saldo REAL de Binance (2026-08-21, PASO 5, pedido explícito) — solo
+    // Bot 4 en modo live lo muestra; el resto de bots queda igual que antes
+    // (panel vacío).
+    $('dcaRealBalancePanel').innerHTML = (isBot4 && real && real.live) ? `
+      <div class="panel" style="border:1px solid #ff3b3b55;">
+        <div class="panel-title">💰 Saldo real en Binance <span class="pill mode-live">🔴 LIVE</span></div>
+        <div class="kv-row"><span class="label">USDT disponible</span><span class="value">${fmtUsd(real.usdtDisponible)}</span></div>
+        <div class="kv-row"><span class="label">BTC</span><span class="value">${real.posiciones.BTC.cantidad.toFixed(6)} (${fmtUsd(real.posiciones.BTC.valorUsd)})</span></div>
+        <div class="kv-row"><span class="label">ETH</span><span class="value">${real.posiciones.ETH.cantidad.toFixed(6)} (${fmtUsd(real.posiciones.ETH.valorUsd)})</span></div>
+        <div class="kv-row"><span class="label">Capital total real</span><span class="value">${fmtUsd(real.capitalRealTotal)}</span></div>
+      </div>` : '';
 
     const pairEntries = Object.entries(path.pares);
     $('dcaPairBlocks').innerHTML = pairEntries.map(([pair, p]) => accumulationPairBlock(pair.split('/')[0], { ...p, capitalInvertido: p.totalInvested })).join('');
@@ -810,6 +826,11 @@ function settingsSkeleton() {
       <div class="stat-sub" style="margin-top:10px;">También podés pasar <code>?api=https://tu-url</code> en la URL — se guarda solo para este navegador.</div>
     </div>
     <div class="panel">
+      <div class="panel-title">📝 Borradores Binance Square</div>
+      <div class="stat-sub" style="margin-bottom:10px;">Generados solos cuando Bot 4 cierra un trade real ganador (+$0.50). No se publican solos — copiá el texto y publicalo vos desde tu cuenta.</div>
+      <div id="squarePostsList"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+    <div class="panel">
       <div class="panel-title">Acerca de</div>
       <div class="kv-row"><span class="label">Dashboard</span><span class="value">Nuvera Bot — Institutional</span></div>
       <div class="kv-row"><span class="label">Repositorio bot</span><span class="value"><a href="https://github.com/alexys1/nuvera-trading-bot" target="_blank" rel="noopener">nuvera-trading-bot</a></span></div>
@@ -844,6 +865,18 @@ async function refreshSettings() {
       <div class="kv-row"><span class="label">Bots activos</span><span class="value">${data.botsActivos}</span></div>`;
   } catch (err) {
     $('setStatus').innerHTML = '<div class="empty-state">No se pudo conectar a la API.</div>';
+  }
+  try {
+    const posts = await fetchJson('/api/square-posts?limit=10');
+    $('squarePostsList').innerHTML = posts.length === 0
+      ? '<div class="empty-state">Todavía no hay borradores.</div>'
+      : posts.map((p) => `
+        <div class="kv-row" style="align-items:flex-start; flex-direction:column; gap:4px; padding:10px 0;">
+          <div>${esc(p.contenido)}</div>
+          <div class="stat-sub">${new Date(p.createdAt).toLocaleString()} ${p.publicado ? '· ya marcado como publicado' : ''}</div>
+        </div>`).join('');
+  } catch (err) {
+    $('squarePostsList').innerHTML = '<div class="empty-state">No se pudieron cargar los borradores.</div>';
   }
 }
 

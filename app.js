@@ -33,6 +33,12 @@ const CACHE_TTL_CRITICAL = 15_000; // capital, PnL — headers de cada página
 const CACHE_TTL_POSITIONS = 30_000; // posiciones abiertas / niveles de grid
 const CACHE_TTL_CHARTS = 60_000; // gráficas
 const CACHE_TTL_GENERAL = 60_000; // historial de trades, ranking, "path" de DCA
+// Página Bot 3/Bot 4 — DCA (2026-08-22, pedido explícito, "actualización en
+// tiempo real sin recargar la página"): intervalos propios para Accumulation
+// Path (=posiciones abiertas, misma fuente /api/bot/dca/:id/path) e Historial
+// de trades — más rápidos que el CACHE_TTL_GENERAL de 60s que usaban antes.
+const CACHE_TTL_DCA_TRADES = 20_000; // DCA Execution History
+const CACHE_TTL_DCA_CHART = 30_000; // gráfica de capital propia de Bot 3/4
 
 const CACHE_TTL_MS = {
   '/api/overview': CACHE_TTL_CRITICAL,
@@ -41,13 +47,20 @@ const CACHE_TTL_MS = {
   '/api/bot/motora/stats': CACHE_TTL_CRITICAL,
   '/api/bot/grid/levels': CACHE_TTL_POSITIONS,
   '/api/competition/ranking': CACHE_TTL_GENERAL,
+  '/api/bot/4/balance-real': CACHE_TTL_CRITICAL, // saldo real Binance — capital/balance cada 15s
 };
 // Rutas dinámicas (con :id numérico en el medio) no matchean por string
-// exacto contra CACHE_TTL_MS — se clasifican por el sufijo del path.
+// exacto contra CACHE_TTL_MS — se clasifican por el sufijo del path. Los
+// regex con \d+ (id numérico) apuntan solo a Bot 2/3/4 — Motor B usa el
+// literal "motorB" en el path y no matchea, así que su cadencia (chart/trades
+// en el bucket GENERAL/CHARTS de siempre) queda intacta.
 function resolveTtl(path) {
   const clean = path.split('?')[0];
   if (CACHE_TTL_MS[clean] !== undefined) return CACHE_TTL_MS[clean];
   if (/^\/api\/competition\/bot\/[^/]+$/.test(clean)) return CACHE_TTL_CRITICAL; // header del bot (capital/PnL)
+  if (/^\/api\/bot\/dca\/\d+\/path$/.test(clean)) return CACHE_TTL_CRITICAL; // Accumulation Path / "posiciones abiertas" de Bot 3/4
+  if (/^\/api\/competition\/bot\/\d+\/trades/.test(clean)) return CACHE_TTL_DCA_TRADES; // DCA Execution History de Bot 3/4
+  if (/^\/api\/competition\/bot\/\d+\/chart/.test(clean)) return CACHE_TTL_DCA_CHART; // gráfica de capital de Bot 3/4
   if (clean.endsWith('/positions')) return CACHE_TTL_POSITIONS;
   if (clean.endsWith('/chart') || clean === '/api/capital-chart') return CACHE_TTL_CHARTS;
   return CACHE_TTL_GENERAL; // /trades, /path, etc.
@@ -721,6 +734,153 @@ async function refreshBot2() {
 // =========================================================================
 // PÁGINAS: BOT 3 (DCA Agresivo) / BOT 4 (DCA BTC/ETH) — renderer compartido
 // =========================================================================
+// Actualización en tiempo real sin recargar la página (2026-08-22, pedido
+// explícito) — "Accumulation Path" y "DCA Execution History" son las dos
+// secciones que antes solo se veían frescas recargando. Se resuelven con:
+//   - Accumulation Path: skeleton de bloques por par construido UNA vez por
+//     visita a la ruta (ids estables por par), después cada refresh solo pisa
+//     texto de elementos existentes (misma técnica que ya usa el resto del
+//     dashboard, ver comentario de ROUTE_RENDER/ROUTE_REFRESH más abajo).
+//   - DCA Execution History: la tabla se arma una vez; los refresh
+//     siguientes solo insertan las filas NUEVAS al principio del <tbody>
+//     (con fade-in vía .row-new en style.css) — nunca se borran ni
+//     reconstruyen las filas existentes.
+//   - Gráfica de capital propia (nueva, /api/competition/bot/:id/chart, ya
+//     existía en el backend para Motor B): en la carga inicial usa setData,
+//     en los refresh siguientes solo agrega el punto nuevo con
+//     series.update() — nunca vuelve a redibujar toda la serie.
+// Bot 3 y Bot 4 comparten este renderer — los cambios de acá benefician a
+// los dos por igual, no es exclusivo de Bot 4.
+let dcaPairKeys = null; // set de pares (string) ya renderizado en el skeleton — null fuerza reconstruir
+let dcaKnownTradeKeys = null; // Set<string> de trades ya en la tabla de historial — null fuerza reconstruir
+let dcaChartLastTime = null; // timestamp (unix seg) del último punto ya graficado
+let dcaCurrentBotId = null; // id de bot_instances resuelto en el último refresh — lo usa el selector de período de la gráfica
+let dcaPeriod = '7';
+
+function pairIdPrefix(pair) { return `dca-${pair.split('/')[0].toLowerCase()}`; }
+
+// accumulationPairBlockSkeleton/updateAccumulationPairBlock: separan
+// estructura (una vez) de datos (cada refresh) — accumulationPairBlock()
+// de más arriba (usada por Motor A) sigue igual, sin tocar, esto es
+// exclusivo de la página compartida Bot 3/Bot 4.
+function accumulationPairBlockSkeleton(label, idPrefix) {
+  return `
+    <div class="pair-block">
+      <div class="pair-block-title">${esc(label)} <span class="stat-sub" id="${idPrefix}-ciclo">—</span></div>
+      <div class="kv-row"><span class="label">Avg Entry</span><span class="value" id="${idPrefix}-avg-entry">—</span></div>
+      <div class="kv-row"><span class="label">Precio actual</span><span class="value" id="${idPrefix}-precio-actual">—</span></div>
+      <div class="kv-row"><span class="label">Capital invertido</span><span class="value" id="${idPrefix}-capital-invertido">—</span></div>
+      <div class="ladder"><div class="ladder-step"><div class="ladder-bar"><div class="ladder-fill" id="${idPrefix}-progress-fill" style="width:0%"></div></div><span class="stat-sub" id="${idPrefix}-progress-pct">0%</span></div></div>
+      <div id="${idPrefix}-trigger-block"></div>
+    </div>`;
+}
+function updateAccumulationPairBlock(idPrefix, p) {
+  if (!p) return;
+  const progressPct = p.maxCompras > 0 ? Math.round((p.compras / p.maxCompras) * 100) : 0;
+  $(`${idPrefix}-ciclo`).textContent = `${p.compras}/${p.maxCompras} compras`;
+  $(`${idPrefix}-avg-entry`).textContent = p.avgEntry !== null ? fmtUsdPrecise(p.avgEntry) : '—';
+  $(`${idPrefix}-precio-actual`).textContent = p.currentPrice !== null ? fmtUsdPrecise(p.currentPrice) : '—';
+  $(`${idPrefix}-capital-invertido`).textContent = fmtUsd(p.totalInvested);
+  $(`${idPrefix}-progress-fill`).style.width = `${progressPct}%`;
+  $(`${idPrefix}-progress-pct`).textContent = `${progressPct}%`;
+  $(`${idPrefix}-trigger-block`).innerHTML = p.nextTriggerPrice !== null ? `
+    <div class="kv-row" style="margin-top:8px;"><span class="label">Próximo trigger</span><span class="value">${fmtUsdPrecise(p.nextTriggerPrice)}</span></div>
+    <div class="kv-row"><span class="label">Drop necesario</span><span class="value pnl-neg">-${p.dropRequiredPct}%</span></div>
+  ` : `<div class="stat-sub" style="margin-top:8px;">${p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.'}</div>`;
+}
+function renderAccumulationPathIncremental(pares) {
+  const pairEntries = Object.entries(pares);
+  const keys = pairEntries.map(([pair]) => pair).sort().join('|');
+  if (keys !== dcaPairKeys) {
+    dcaPairKeys = keys;
+    $('dcaPairBlocks').innerHTML = pairEntries.map(([pair]) => accumulationPairBlockSkeleton(pair.split('/')[0], pairIdPrefix(pair))).join('');
+  }
+  pairEntries.forEach(([pair, p]) => updateAccumulationPairBlock(pairIdPrefix(pair), p));
+}
+
+// DCA Execution History incremental — la API no expone un id de trade (ver
+// /api/competition/bot/:id/trades en server.js), así que se usa "pair +
+// closedAt" como clave única (closedAt es un timestamp de Postgres con
+// precisión de milisegundos, alcanza para no colisionar entre trades del
+// mismo bot).
+function tradeKey(t) { return `${t.pair}|${t.closedAt || t.createdAt}`; }
+function tradeRowHtml(t, extraClass = '') {
+  const time = fmtDateShort(t.closedAt || t.createdAt);
+  const sideTxt = (t.side || 'buy').toUpperCase();
+  const rowClass = [t.pnl >= 0 ? 'row-buy' : 'row-sell', extraClass].filter(Boolean).join(' ');
+  return `
+    <tr class="${rowClass}">
+      <td>${time}</td>
+      <td>${esc(t.pair)}</td>
+      <td class="side-cell side-${t.side || 'buy'}">${sideTxt}</td>
+      <td>${fmtUsdPrecise(t.entryPrice, t.entryPrice < 10 ? 4 : 2)}</td>
+      <td>${fmtUsd(t.sizeUsdt)}</td>
+      <td class="${pnlClass(t.pnl)}">${fmtUsd(t.pnl)}</td>
+    </tr>`;
+}
+function renderDcaHistoryIncremental(closed) {
+  const tbody = dcaKnownTradeKeys !== null ? $('dcaHistoryBody') : null;
+  if (!tbody) {
+    // Primera carga de esta visita a la ruta (o el contenedor todavía no
+    // tenía tabla): arma todo de una, sin animación.
+    dcaKnownTradeKeys = new Set(closed.map(tradeKey));
+    $('dcaHistory').innerHTML = closed.length === 0
+      ? '<div class="empty-state">Sin trades todavía.</div>'
+      : `<table class="data-table">
+          <thead><tr><th>Time</th><th>Pair</th><th>Side</th><th>Price</th><th>Size</th><th>PnL</th></tr></thead>
+          <tbody id="dcaHistoryBody">${closed.map((t) => tradeRowHtml(t)).join('')}</tbody>
+        </table>`;
+    return;
+  }
+  // closed viene ordenado más nuevo primero (created_at DESC, ver
+  // getTradesForBotInstance en queries.js) — se recorre desde el principio
+  // hasta encontrar el primer trade ya conocido; todo lo anterior es nuevo.
+  const nuevos = [];
+  for (const t of closed) {
+    const key = tradeKey(t);
+    if (dcaKnownTradeKeys.has(key)) break;
+    nuevos.push(t);
+    dcaKnownTradeKeys.add(key);
+  }
+  if (nuevos.length === 0) return;
+  // Se insertan en reversa para que, tras varios inserts al principio,
+  // queden en el mismo orden (más nuevo primero) que trae la API.
+  for (let i = nuevos.length - 1; i >= 0; i--) {
+    tbody.insertAdjacentHTML('afterbegin', tradeRowHtml(nuevos[i], 'row-new'));
+  }
+}
+
+// Gráfica de capital de Bot 3/4 (2026-08-22, pedido explícito) — mismo
+// helper genérico ensureAreaChart que Overview/Motor B, pero solo agrega el
+// punto nuevo con series.update() en vez de volver a mandar toda la serie
+// con setData() en cada refresh (eso es lo que "sin recargar toda la
+// gráfica" pide evitar).
+async function loadDcaChart(id, days, force = false) {
+  try {
+    const raw = await fetchJson(`/api/competition/bot/${id}/chart?days=${days}`, { force });
+    if (!raw || raw.length === 0) {
+      $('dcaChartPlaceholder').style.display = 'flex';
+      $('dcaChartPlaceholder').textContent = 'Sin historial de capital todavía (sin trades cerrados).';
+      return;
+    }
+    const points = raw
+      .map((p) => ({ time: Math.floor(new Date(p.timestamp).getTime() / 1000), value: p.capital }))
+      .sort((a, b) => a.time - b.time);
+    $('dcaChartPlaceholder').style.display = 'none';
+    $('dcaChartContainer').style.display = 'block';
+    const { chart, series } = ensureAreaChart('dcaChartContainer', '#00ff88');
+    if (dcaChartLastTime === null || force) {
+      series.setData(downsample(points, 200));
+      chart.timeScale().fitContent();
+    } else {
+      points.filter((p) => p.time > dcaChartLastTime).forEach((p) => series.update(p));
+    }
+    dcaChartLastTime = points[points.length - 1].time;
+  } catch (err) {
+    if ($('dcaChartPlaceholder')) { $('dcaChartPlaceholder').style.display = 'flex'; $('dcaChartPlaceholder').textContent = 'No se pudo cargar la gráfica.'; }
+  }
+}
+
 function dcaBotSkeleton(title, emoji) {
   return `
     <div class="bot-page-header">
@@ -734,6 +894,16 @@ function dcaBotSkeleton(title, emoji) {
       <div class="stat-box"><div class="stat-label">PnL total</div><div class="stat-value" id="dcaPnl">—</div></div>
       <div class="stat-box"><div class="stat-label">Winrate (7d)</div><div class="stat-value" id="dcaWr">—</div></div>
       <div class="stat-box"><div class="stat-label">Trades hoy / 7d</div><div class="stat-value" id="dcaTrades">—</div></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-title">Capital — ${esc(title)}</div>
+      <div class="period-selector" id="dcaPeriodSelector">
+        <button class="period-btn" data-period="1">1D</button>
+        <button class="period-btn active" data-period="7">7D</button>
+        <button class="period-btn" data-period="30">30D</button>
+      </div>
+      <div id="dcaChartPlaceholder" class="chart-placeholder">Cargando gráfica…</div>
+      <div id="dcaChartContainer" class="chart-el" style="display:none;"></div>
     </div>
     <div class="section-title">Accumulation Path</div>
     <div class="two-col">
@@ -754,6 +924,22 @@ function dcaBotSkeleton(title, emoji) {
 
 function renderDcaBotSkeleton(title, emoji) {
   $('content').innerHTML = dcaBotSkeleton(title, emoji);
+  dcaPairKeys = null;
+  dcaKnownTradeKeys = null;
+  dcaChartLastTime = null;
+  dcaCurrentBotId = null;
+
+  $('dcaPeriodSelector').querySelectorAll('.period-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.period === dcaPeriod);
+    btn.addEventListener('click', () => {
+      if (btn.dataset.period === dcaPeriod) return;
+      $('dcaPeriodSelector').querySelectorAll('.period-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      dcaPeriod = btn.dataset.period;
+      dcaChartLastTime = null; // fuerza setData con la nueva ventana en vez de series.update()
+      if (dcaCurrentBotId !== null) loadDcaChart(dcaCurrentBotId, dcaPeriod, true);
+    });
+  });
 }
 
 async function refreshDcaBotPage(estrategia) {
@@ -761,6 +947,7 @@ async function refreshDcaBotPage(estrategia) {
     const isBot4 = estrategia === 'competitionDcaMotorA';
     const id = await getBotIdByEstrategia(estrategia);
     if (id === null) throw new Error('bot no encontrado');
+    dcaCurrentBotId = id;
     const [bot, trades, path, real] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson(`/api/competition/bot/${id}/trades?limit=50`),
@@ -793,8 +980,7 @@ async function refreshDcaBotPage(estrategia) {
         <div class="kv-row"><span class="label">Capital total real</span><span class="value">${fmtUsd(real.capitalRealTotal)}</span></div>
       </div>` : '';
 
-    const pairEntries = Object.entries(path.pares);
-    $('dcaPairBlocks').innerHTML = pairEntries.map(([pair, p]) => accumulationPairBlock(pair.split('/')[0], { ...p, capitalInvertido: p.totalInvested })).join('');
+    renderAccumulationPathIncremental(path.pares);
 
     $('dcaConfigPanel').innerHTML = `
       <div class="kv-row"><span class="label">Orden por compra</span><span class="value">${path.config.baseOrderUsd !== null ? fmtUsd(path.config.baseOrderUsd) : 'variable (IA)'}</span></div>
@@ -803,12 +989,13 @@ async function refreshDcaBotPage(estrategia) {
       <div class="kv-row"><span class="label">Máx. compras</span><span class="value">${path.config.maxCompras}</span></div>`;
 
     const closed = trades.filter((t) => t.outcome !== 'open');
-    $('dcaHistory').innerHTML = tradesTableHtml(closed);
+    renderDcaHistoryIncremental(closed);
     $('dcaErrorBanner').innerHTML = '';
   } catch (err) {
     // Contenedor dedicado (2026-08-20, mismo criterio que Bot 2/Motor A).
     $('dcaErrorBanner').innerHTML = '<div class="empty-state">No se pudo cargar la información del bot.</div>';
   }
+  loadDcaChart(dcaCurrentBotId, dcaPeriod);
 }
 
 // =========================================================================
@@ -920,19 +1107,22 @@ let currentRoute = null;
 let pollTimer = null;
 
 function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
-// Intervalo base 15s (2026-08-20, pedido explícito "datos críticos cada
-// 15s") — las llamadas a datos menos urgentes (posiciones 30s, gráficas/
-// historial 60s) no necesitan un setInterval propio: fetchJson ya cachea por
-// endpoint con su propio TTL (ver resolveTtl arriba), así que aunque
-// refresh() se llame cada 15s, la red solo se golpea con la frecuencia real
-// de cada tipo de dato — mismo resultado, menos código.
+// Intervalo base 5s (2026-08-22, pedido explícito Bot 3/4: "capital 15s,
+// posiciones 15s, historial 20s, gráfica 30s" — antes el tick era de 15s,
+// que no puede alinearse con 20s/30s exactos; 5s sí, porque 15/20/30 son
+// todos múltiplos de 5). Las llamadas a datos menos urgentes no necesitan un
+// setInterval propio: fetchJson ya cachea por endpoint con su propio TTL
+// (ver resolveTtl arriba), así que aunque refresh() se llame cada 5s, la red
+// solo se golpea con la frecuencia real de cada tipo de dato — mismo
+// resultado que antes para el resto de páginas (15/30/60s siguen siendo
+// múltiplos de 5s), más preciso para Bot 3/4.
 function startPolling() {
   stopPolling();
   pollTimer = setInterval(() => {
     if (document.hidden) return;
     const refresh = ROUTE_REFRESH[currentRoute];
     if (refresh) refresh();
-  }, 15_000);
+  }, 5_000);
 }
 
 function applyRoute() {

@@ -300,10 +300,17 @@ async function refreshOverview() {
     const pnl24hEl = $('ovPnl24h');
     pnl24hEl.textContent = `${fmtUsd(data.pnlHoy)} (${fmtPct(data.pnlPct)})`;
     pnl24hEl.className = `stat-value ${pnlClass(data.pnlHoy)}`;
-    $('ovActiveBots').textContent = `${data.botsActivos} Running`;
+    // Bot 4 con dinero real (2026-08-21, pedido explícito, Opción A —
+    // "todo el foco en el bot real"): con MODE=live en el bot, Motor A/B y
+    // Bot 2/3 quedan sin cron (ver BOT4_LIVE_FOCUS en bot.js) — el Overview
+    // deja de mostrarlos para no confundir con bots pausados. Si el bot
+    // vuelve a MODE=paper (arquitectura completa de 5 bots), vuelven a
+    // aparecer solos, sin tocar código de nuevo.
+    const bots = data.modo === 'live' ? data.bots.filter((b) => b.estrategia === 'competitionDcaMotorA') : data.bots;
+    $('ovActiveBots').textContent = `${bots.filter((b) => b.activo !== false).length} Running`;
     $('ovWinRate').textContent = `${data.winRateGlobal}% / ${data.tradesHoy} trades`;
 
-    renderOverviewBots(data.bots);
+    renderOverviewBots(bots);
   } catch (err) {
     $('ovBotsGrid').innerHTML = '<div class="empty-state">No se pudo cargar el overview (reintentando…)</div>';
   }
@@ -950,7 +957,31 @@ document.addEventListener('visibilitychange', () => {
   startPolling();
 });
 
+// applySidebarFocus (2026-08-21, pedido explícito, Opción A — "todo el foco
+// en el bot real"): con MODE=live el bot corre con BOT4_LIVE_FOCUS=true
+// (Motor A/B y Bot 2/3 sin cron, ver bot.js) — el sidebar oculta esas rutas
+// para no confundir con bots pausados. Si alguien tenía el hash de una ruta
+// oculta abierto (p.ej. #motorb), lo manda a Overview. Vuelve MODE=paper y
+// el próximo load del dashboard las muestra de nuevo solo — no hace falta
+// tocar código de nuevo.
+const BOTS_OCULTABLES = ['motorb', 'motora', 'bot2', 'bot3'];
+async function applySidebarFocus() {
+  try {
+    const data = await fetchJson('/api/overview');
+    if (data.modo !== 'live') return;
+    BOTS_OCULTABLES.forEach((route) => {
+      const btn = document.querySelector(`.nav-item[data-route="${route}"]`);
+      if (btn) btn.style.display = 'none';
+    });
+    const raw = window.location.hash.replace('#', '');
+    if (BOTS_OCULTABLES.includes(raw)) window.location.hash = 'overview';
+  } catch (err) {
+    // Sin conexión a la API todavía: se deja el sidebar completo, no bloquea nada.
+  }
+}
+
 function init() {
+  applySidebarFocus();
   if (!window.location.hash) window.location.hash = 'overview';
   else applyRoute();
 }

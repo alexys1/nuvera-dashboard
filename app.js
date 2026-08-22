@@ -48,6 +48,7 @@ const CACHE_TTL_MS = {
   '/api/bot/grid/levels': CACHE_TTL_POSITIONS,
   '/api/competition/ranking': CACHE_TTL_GENERAL,
   '/api/bot/4/balance-real': CACHE_TTL_CRITICAL, // saldo real Binance — capital/balance cada 15s
+  '/api/bot/4/thoughts': CACHE_TTL_CRITICAL, // "qué está pensando el bot" — cada 15s (2026-08-22, pedido explícito)
 };
 // Rutas dinámicas (con :id numérico en el medio) no matchean por string
 // exacto contra CACHE_TTL_MS — se clasifican por el sufijo del path. Los
@@ -892,6 +893,48 @@ async function loadDcaChart(id, days, force = false) {
   }
 }
 
+// "🧠 Qué está pensando el bot" (2026-08-22, pedido explícito) — GET
+// /api/bot/4/thoughts, exclusivo de Bot 4 (el endpoint no es genérico por
+// id como el resto de la página compartida, así que Bot 3 no lo consulta).
+function relativeTimeEs(iso) {
+  if (!iso) return '—';
+  const diffSec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (diffSec < 60) return `hace ${diffSec} segundo${diffSec === 1 ? '' : 's'}`;
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `hace ${diffMin} minuto${diffMin === 1 ? '' : 's'}`;
+  const diffH = Math.round(diffMin / 60);
+  return `hace ${diffH} hora${diffH === 1 ? '' : 's'}`;
+}
+function estadoGeneralThoughts(pensamientos) {
+  if (!pensamientos || pensamientos.length === 0) return { icon: '⚪', label: 'SIN DATOS', sub: 'Todavía no hay pensamientos registrados.' };
+  if (pensamientos.some((p) => p.decision === 'comprar')) return { icon: '🟢', label: 'COMPRANDO', sub: 'Encontró una entrada con confianza suficiente.' };
+  return { icon: '🟡', label: 'ANALIZANDO', sub: 'Mercado bajo análisis, esperando mejor punto de entrada.' };
+}
+function renderThoughtsPanel(data) {
+  const pensamientos = data.pensamientos || [];
+  const masReciente = pensamientos.reduce((max, p) => (!max || new Date(p.timestamp) > new Date(max.timestamp) ? p : max), null);
+  const estado = estadoGeneralThoughts(pensamientos);
+  const cuerpo = pensamientos.length === 0
+    ? '<div class="empty-state">El bot todavía no registró ninguna decisión.</div>'
+    : pensamientos.map((p) => `
+      <div class="thought-block">
+        <div class="thought-pair">${esc(p.par)}</div>
+        <div class="thought-quote">💭 "${esc(p.razon || p.accion || 'sin detalle')}"</div>
+        <div class="stat-sub">Confianza actual: ${p.confianza}% | Necesita: ${data.confianzaMinima}%</div>
+      </div>`).join('');
+  return `
+    <div class="panel" style="border:1px solid #f0b90b55;">
+      <div class="panel-title">🧠 Qué está pensando el bot</div>
+      <div class="stat-sub" style="margin-bottom:10px;">Actualizado ${relativeTimeEs(masReciente && masReciente.timestamp)}</div>
+      ${cuerpo}
+      <div class="kv-row" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
+        <span class="label">Estado general</span>
+        <span class="value">${estado.icon} ${estado.label}</span>
+      </div>
+      <div class="stat-sub">${esc(estado.sub)}</div>
+    </div>`;
+}
+
 function dcaBotSkeleton(title, emoji) {
   return `
     <div class="bot-page-header">
@@ -901,6 +944,7 @@ function dcaBotSkeleton(title, emoji) {
     </div>
     <div id="dcaErrorBanner"></div>
     <div id="dcaRealBalancePanel"></div>
+    <div id="dcaThoughtsPanel"></div>
     <div class="stat-row">
       <div class="stat-box"><div class="stat-label">PnL total</div><div class="stat-value" id="dcaPnl">—</div></div>
       <div class="stat-box"><div class="stat-label">Winrate (7d)</div><div class="stat-value" id="dcaWr">—</div></div>
@@ -959,11 +1003,12 @@ async function refreshDcaBotPage(estrategia) {
     const id = await getBotIdByEstrategia(estrategia);
     if (id === null) throw new Error('bot no encontrado');
     dcaCurrentBotId = id;
-    const [bot, trades, path, real] = await Promise.all([
+    const [bot, trades, path, real, thoughts] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson(`/api/competition/bot/${id}/trades?limit=50`),
       fetchJson(`/api/bot/dca/${id}/path`),
       isBot4 ? fetchJson('/api/bot/4/balance-real').catch(() => null) : Promise.resolve(null),
+      isBot4 ? fetchJson('/api/bot/4/thoughts').catch(() => null) : Promise.resolve(null),
     ]);
     $('dcaStatusPill').innerHTML = statusPillHtml(bot.activo);
     $('dcaModePill').innerHTML = modePillHtml(real && real.live ? 'live' : 'paper');
@@ -990,6 +1035,9 @@ async function refreshDcaBotPage(estrategia) {
         <div class="kv-row"><span class="label">ETH</span><span class="value">${real.posiciones.ETH.cantidad.toFixed(6)} (${fmtUsd(real.posiciones.ETH.valorUsd)})</span></div>
         <div class="kv-row"><span class="label">Capital total real</span><span class="value">${fmtUsd(real.capitalRealTotal)}</span></div>
       </div>` : '';
+
+    // "Qué está pensando el bot" (2026-08-22, pedido explícito) — solo Bot 4.
+    $('dcaThoughtsPanel').innerHTML = (isBot4 && thoughts) ? renderThoughtsPanel(thoughts) : '';
 
     renderAccumulationPathIncremental(path.pares);
 

@@ -910,6 +910,38 @@ function estadoGeneralThoughts(pensamientos) {
   if (pensamientos.some((p) => p.decision === 'comprar')) return { icon: '🟢', label: 'COMPRANDO', sub: 'Encontró una entrada con confianza suficiente.' };
   return { icon: '🟡', label: 'ANALIZANDO', sub: 'Mercado bajo análisis, esperando mejor punto de entrada.' };
 }
+// Contexto semanal (2026-08-22, pedido explícito) — GET /api/bot/4/thoughts
+// devuelve contextoSemanal.{btcCambio7d,ethCambio7d} (ver getMarketContext en
+// competitionDcaMotorA.js, nuvera-trading-bot). Umbral ±10%: por encima de
+// +10% es sobrecompra de la semana → naranja/cautela (mismo criterio que
+// RSI_MAX_COMPRA del bot); por debajo de -10% es una caída fuerte → verde,
+// porque para un bot DCA que compra el drop una caída grande es oportunidad,
+// no riesgo (al revés del caso positivo). Entre medio, gris/normal.
+function cambio7dInfo(pct) {
+  if (pct === null || pct === undefined) return { texto: 'N/D', color: 'var(--text-sec)', icon: '' };
+  const texto = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+  if (pct > 10) return { texto, color: 'var(--yellow)', icon: ' ⚠️' };
+  if (pct < -10) return { texto, color: 'var(--green)', icon: ' 🟢' };
+  return { texto, color: 'var(--text-sec)', icon: '' };
+}
+function renderContextoSemanal(contextoSemanal) {
+  if (!contextoSemanal) return '';
+  const { btcCambio7d, ethCambio7d } = contextoSemanal;
+  const btc = cambio7dInfo(btcCambio7d);
+  const eth = cambio7dInfo(ethCambio7d);
+  const sobreextendido = (btcCambio7d !== null && btcCambio7d > 10) || (ethCambio7d !== null && ethCambio7d > 10);
+  const conDescuento = !sobreextendido && ((btcCambio7d !== null && btcCambio7d < -10) || (ethCambio7d !== null && ethCambio7d < -10));
+  const resumen = sobreextendido
+    ? '<div class="stat-sub" style="color:var(--yellow); margin-top:4px;">⚠️ Mercado sobreextendido — bot más cauteloso</div>'
+    : conDescuento
+      ? '<div class="stat-sub" style="color:var(--green); margin-top:4px;">🟢 Caída fuerte esta semana — posible oportunidad de compra</div>'
+      : '';
+  return `
+    <div class="stat-sub" style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">📈 CONTEXTO SEMANAL:</div>
+    <div class="kv-row"><span class="label">BTC</span><span class="value" style="color:${btc.color};">${btc.texto} esta semana${btc.icon}</span></div>
+    <div class="kv-row"><span class="label">ETH</span><span class="value" style="color:${eth.color};">${eth.texto} esta semana${eth.icon}</span></div>
+    ${resumen}`;
+}
 function renderThoughtsPanel(data) {
   const pensamientos = data.pensamientos || [];
   const masReciente = pensamientos.reduce((max, p) => (!max || new Date(p.timestamp) > new Date(max.timestamp) ? p : max), null);
@@ -932,6 +964,7 @@ function renderThoughtsPanel(data) {
         <span class="value">${estado.icon} ${estado.label}</span>
       </div>
       <div class="stat-sub">${esc(estado.sub)}</div>
+      ${renderContextoSemanal(data.contextoSemanal)}
     </div>`;
 }
 

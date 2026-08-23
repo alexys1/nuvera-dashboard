@@ -771,6 +771,7 @@ function accumulationPairBlockSkeleton(label, idPrefix) {
       <div class="kv-row"><span class="label">Avg Entry</span><span class="value" id="${idPrefix}-avg-entry">—</span></div>
       <div class="kv-row"><span class="label">Precio actual</span><span class="value" id="${idPrefix}-precio-actual">—</span></div>
       <div class="kv-row"><span class="label">Capital invertido</span><span class="value" id="${idPrefix}-capital-invertido">—</span></div>
+      <div id="${idPrefix}-tp-block"></div>
       <div class="ladder"><div class="ladder-step"><div class="ladder-bar"><div class="ladder-fill" id="${idPrefix}-progress-fill" style="width:0%"></div></div><span class="stat-sub" id="${idPrefix}-progress-pct">0%</span></div></div>
       <div id="${idPrefix}-trigger-block"></div>
     </div>`;
@@ -782,6 +783,16 @@ function updateAccumulationPairBlock(idPrefix, p) {
   $(`${idPrefix}-avg-entry`).textContent = p.avgEntry !== null ? fmtUsdPrecise(p.avgEntry) : '—';
   $(`${idPrefix}-precio-actual`).textContent = p.currentPrice !== null ? fmtUsdPrecise(p.currentPrice) : '—';
   $(`${idPrefix}-capital-invertido`).textContent = fmtUsd(p.totalInvested);
+  // TP actual del ciclo / precio de venta (2026-08-23, pedido explícito) —
+  // solo se muestra si hay compras abiertas (p.tpPct viene null si el par
+  // todavía no tiene ningún trade abierto).
+  $(`${idPrefix}-tp-block`).innerHTML = p.tpPct !== null ? `
+    <div class="tp-divider"></div>
+    <div class="kv-row"><span class="label">🎯 TP actual</span><span class="value">${p.tpPct}%</span></div>
+    <div class="kv-row"><span class="label">💰 Vende en</span><span class="value">${fmtUsdPrecise(p.precioVenta)}</span></div>
+    <div class="kv-row"><span class="label">📈 Falta subir</span><span class="value pnl-pos">${fmtUsd(p.faltaSubir)} (+${p.faltaPct}%)</span></div>
+    <div class="tp-divider"></div>
+  ` : '';
   $(`${idPrefix}-progress-fill`).style.width = `${progressPct}%`;
   $(`${idPrefix}-progress-pct`).textContent = `${progressPct}%`;
   $(`${idPrefix}-trigger-block`).innerHTML = p.nextTriggerPrice !== null ? `

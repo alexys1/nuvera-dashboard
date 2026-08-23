@@ -273,6 +273,8 @@ table.data-table tr.row-new { animation: row-fade-in 1.2s ease-out; }
 /* ---------- Accumulation path (Motor A / Bot 3 / Bot 4) ---------- */
 .pair-block { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
 .pair-block-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; display:flex; align-items:center; gap:8px; }
+/* Separador del bloque "TP actual / Vende en / Falta subir" (2026-08-23) */
+.tp-divider { border-top: 1px dashed var(--border); margin: 8px 0; }
 .ladder { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
 .ladder-step { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
 .ladder-bar { height: 6px; border-radius: 3px; background: var(--active-bg); flex: 1; overflow: hidden; }

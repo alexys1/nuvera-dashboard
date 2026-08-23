@@ -182,9 +182,28 @@ function investedFreeHtml(capitalInvertido, capitalLibre) {
   return `${fmtUsd(capitalInvertido)} invertido · ${fmtUsd(capitalLibre)} libre`;
 }
 const RANK_MEDALS = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-function fmtDateShort(iso) {
+// formatTimePeru (2026-08-23, pedido explícito: "columna con hora de Perú
+// UTC-5" en DCA Execution History) — dos líneas en la misma celda, hora
+// servidor (UTC) arriba en gris y hora Perú abajo en blanco/negrita, para
+// que el usuario no tenga que restar 5h a mano en cada trade.
+function formatTimePeru(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const fecha = new Date(iso);
+  const utcStr = fecha.toLocaleString('es-PE', {
+    timeZone: 'UTC',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const peruStr = fecha.toLocaleString('es-PE', {
+    timeZone: 'America/Lima',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `<span class="time-utc">${utcStr} UTC</span><span class="time-peru">${peruStr} PE</span>`;
 }
 
 // =========================================================================
@@ -386,7 +405,7 @@ function motorBSkeleton() {
 function tradesTableHtml(trades) {
   if (!trades || trades.length === 0) return '<div class="empty-state">Sin trades todavía.</div>';
   const rows = trades.map((t) => {
-    const time = fmtDateShort(t.closedAt || t.createdAt);
+    const time = formatTimePeru(t.closedAt || t.createdAt);
     const sideTxt = (t.side || 'buy').toUpperCase();
     const rowClass = t.outcome === 'open' ? '' : (t.pnl >= 0 ? 'row-buy' : 'row-sell');
     return `
@@ -817,7 +836,7 @@ function renderAccumulationPathIncremental(pares) {
 // mismo bot).
 function tradeKey(t) { return `${t.pair}|${t.closedAt || t.createdAt}`; }
 function tradeRowHtml(t, extraClass = '') {
-  const time = fmtDateShort(t.closedAt || t.createdAt);
+  const time = formatTimePeru(t.closedAt || t.createdAt);
   const sideTxt = (t.side || 'buy').toUpperCase();
   const rowClass = [t.pnl >= 0 ? 'row-buy' : 'row-sell', extraClass].filter(Boolean).join(' ');
   return `

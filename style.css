@@ -239,6 +239,10 @@ table.data-table th {
   letter-spacing: 0.3px;
 }
 table.data-table td { padding: 9px 10px; border-top: 1px solid var(--border); }
+/* Columna Time con hora servidor (UTC) + hora Perú (2026-08-23, pedido
+   explícito) — ver formatTimePeru() en app.js. */
+.time-utc { display: block; font-size: 0.85em; color: var(--text-sec); }
+.time-peru { display: block; font-size: 0.9em; color: var(--text); font-weight: 500; }
 table.data-table tr.row-buy td:first-child, table.data-table tr.side-buy .side-cell { color: var(--green); }
 table.data-table tr.row-sell td:first-child, table.data-table tr.side-sell .side-cell { color: var(--red); }
 /* Fila nueva insertada por el polling silencioso (2026-08-22, pedido

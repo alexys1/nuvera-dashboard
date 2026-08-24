@@ -284,6 +284,28 @@ table.data-table tr.row-new { animation: row-fade-in 1.2s ease-out; }
 .ladder-bar { height: 6px; border-radius: 3px; background: var(--active-bg); flex: 1; overflow: hidden; }
 .ladder-fill { height: 100%; background: var(--yellow); }
 
+/* ---------- Historial de Ciclos (Bot 4, 2026-08-24, pedido explícito:
+   "reemplazar DCA Execution History con vista de ciclos") — <details>/
+   <summary> nativo: el navegador maneja abierto/cerrado solo, así que un
+   refresh incremental (solo prepend de tarjetas nuevas, ver
+   renderDcaCyclesIncremental) no pierde el estado expandido de las
+   existentes. ---------- */
+.cycle-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.cycle-card[open] { background: var(--active-bg); }
+.cycle-card summary { cursor: pointer; list-style: none; }
+.cycle-card summary::-webkit-details-marker { display: none; }
+.cycle-summary-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.cycle-summary-main { display: flex; flex-direction: column; gap: 2px; }
+.cycle-pair { font-weight: 700; font-size: 14px; }
+.cycle-meta { font-size: 11.5px; color: var(--text-sec); }
+.cycle-outcome { font-weight: 700; font-size: 14px; white-space: nowrap; }
+.cycle-chevron { color: var(--text-sec); font-size: 11px; transition: transform 0.15s ease; }
+.cycle-card[open] .cycle-chevron { transform: rotate(90deg); }
+.cycle-body { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+table.cycle-buys-table { margin-top: 8px; min-width: 0; }
+table.cycle-buys-table th, table.cycle-buys-table td { padding: 6px 8px; font-size: 12px; }
+.cycle-card.row-new { animation: row-fade-in 1.2s ease-out; }
+
 /* ---------- "Qué está pensando el bot" (Bot 4, 2026-08-22, pedido
    explícito) ---------- */
 .thought-block { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }

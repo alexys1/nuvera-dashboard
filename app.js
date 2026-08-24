@@ -49,6 +49,7 @@ const CACHE_TTL_MS = {
   '/api/competition/ranking': CACHE_TTL_GENERAL,
   '/api/bot/4/balance-real': CACHE_TTL_CRITICAL, // saldo real Binance — capital/balance cada 15s
   '/api/bot/4/thoughts': CACHE_TTL_CRITICAL, // "qué está pensando el bot" — cada 15s (2026-08-22, pedido explícito)
+  '/api/bot/4/cycles': CACHE_TTL_DCA_TRADES, // Historial de Ciclos (2026-08-24) — misma cadencia que la tabla de trades que reemplaza
 };
 // Rutas dinámicas (con :id numérico en el medio) no matchean por string
 // exacto contra CACHE_TTL_MS — se clasifican por el sufijo del path. Los
@@ -773,6 +774,7 @@ async function refreshBot2() {
 // los dos por igual, no es exclusivo de Bot 4.
 let dcaPairKeys = null; // set de pares (string) ya renderizado en el skeleton — null fuerza reconstruir
 let dcaKnownTradeKeys = null; // Set<string> de trades ya en la tabla de historial — null fuerza reconstruir
+let dcaKnownCycleKeys = null; // Set<string> de ciclos ya en "Historial de Ciclos" (solo Bot 4) — null fuerza reconstruir
 let dcaChartLastTime = null; // timestamp (unix seg) del último punto ya graficado
 let dcaCurrentBotId = null; // id de bot_instances resuelto en el último refresh — lo usa el selector de período de la gráfica
 let dcaPeriod = '7';
@@ -878,6 +880,73 @@ function renderDcaHistoryIncremental(closed) {
   // queden en el mismo orden (más nuevo primero) que trae la API.
   for (let i = nuevos.length - 1; i >= 0; i--) {
     tbody.insertAdjacentHTML('afterbegin', tradeRowHtml(nuevos[i], 'row-new'));
+  }
+}
+
+// Historial de Ciclos (2026-08-24, pedido explícito, "reemplazar DCA
+// Execution History con vista de ciclos" — exclusivo de Bot 4, GET
+// /api/bot/4/cycles en server.js/nuvera-trading-bot): un ciclo = todas las
+// compras DCA de un par que se cerraron JUNTAS en la misma venta (ver
+// sellAll en competitionDcaMotorA.js) — antes se veía como N filas sueltas
+// en la tabla de historial, ahora es UNA tarjeta expandible con el resumen
+// del ciclo y, adentro, el detalle de cada compra. Misma técnica
+// incremental que renderDcaHistoryIncremental (solo prepend de tarjetas
+// nuevas) — clave única "par|cierreTs" (cierreTs = closed_at de la última
+// compra del ciclo, ver server.js).
+function cycleKey(c) { return `${c.par}|${c.cierreTs}`; }
+function cycleCardHtml(c, extraClass = '') {
+  const cardClass = ['cycle-card', extraClass].filter(Boolean).join(' ');
+  const comprasHtml = c.compras.map((b) => `
+    <tr>
+      <td>${fmtUsdPrecise(b.precio, b.precio < 10 ? 4 : 2)}</td>
+      <td>${fmtUsd(b.monto)}</td>
+      <td class="${pnlClass(b.pnl)}">${fmtUsd(b.pnl)}</td>
+    </tr>`).join('');
+  return `
+    <details class="${cardClass}">
+      <summary>
+        <div class="cycle-summary-row">
+          <div class="cycle-summary-main">
+            <span class="cycle-pair">${esc(c.par)}</span>
+            <span class="cycle-meta">${esc(c.fechaInicio)} → ${esc(c.fechaFin)} (${esc(c.duracion)}) · ${c.numCompras} compras · ${fmtUsd(c.totalInvertido)} invertido</span>
+          </div>
+          <span class="cycle-outcome ${pnlClass(c.pnlTotal)}">${c.outcome === 'win' ? '✅' : '❌'} ${fmtUsd(c.pnlTotal)}<span class="cycle-chevron"> ▶</span></span>
+        </div>
+      </summary>
+      <div class="cycle-body">
+        <div class="kv-row"><span class="label">Precio promedio</span><span class="value">${fmtUsdPrecise(c.precioPromedio, c.precioPromedio < 10 ? 4 : 2)}</span></div>
+        <div class="kv-row"><span class="label">Precio de salida</span><span class="value">${fmtUsdPrecise(c.precioSalida, c.precioSalida < 10 ? 4 : 2)}</span></div>
+        <table class="data-table cycle-buys-table">
+          <thead><tr><th>Precio</th><th>Monto</th><th>PnL</th></tr></thead>
+          <tbody>${comprasHtml}</tbody>
+        </table>
+      </div>
+    </details>`;
+}
+function renderDcaCyclesIncremental(ciclos) {
+  const list = dcaKnownCycleKeys !== null ? $('dcaCyclesList') : null;
+  if (!list) {
+    // Primera carga de esta visita a la ruta: arma todas las tarjetas de una,
+    // sin animación de "nuevo".
+    dcaKnownCycleKeys = new Set(ciclos.map(cycleKey));
+    $('dcaHistory').innerHTML = ciclos.length === 0
+      ? '<div class="empty-state">Sin ciclos cerrados todavía.</div>'
+      : `<div id="dcaCyclesList">${ciclos.map((c) => cycleCardHtml(c)).join('')}</div>`;
+    return;
+  }
+  // ciclos viene ordenado más nuevo primero (ver /api/bot/4/cycles en
+  // server.js) — se recorre desde el principio hasta el primer ciclo ya
+  // conocido; todo lo anterior es nuevo.
+  const nuevos = [];
+  for (const c of ciclos) {
+    const key = cycleKey(c);
+    if (dcaKnownCycleKeys.has(key)) break;
+    nuevos.push(c);
+    dcaKnownCycleKeys.add(key);
+  }
+  if (nuevos.length === 0) return;
+  for (let i = nuevos.length - 1; i >= 0; i--) {
+    list.insertAdjacentHTML('afterbegin', cycleCardHtml(nuevos[i], 'row-new'));
   }
 }
 
@@ -998,7 +1067,7 @@ function renderThoughtsPanel(data) {
     </div>`;
 }
 
-function dcaBotSkeleton(title, emoji) {
+function dcaBotSkeleton(title, emoji, isBot4 = false) {
   return `
     <div class="bot-page-header">
       <div class="bph-title">${emoji} ${esc(title)} <span id="dcaStatusPill"></span></div>
@@ -1034,16 +1103,17 @@ function dcaBotSkeleton(title, emoji) {
       </div>
     </div>
     <div class="panel">
-      <div class="panel-title">DCA Execution History</div>
+      <div class="panel-title">${isBot4 ? 'Historial de Ciclos' : 'DCA Execution History'}</div>
       <div class="table-wrap" id="dcaHistory"><div class="empty-state skeleton">Cargando…</div></div>
     </div>
   `;
 }
 
-function renderDcaBotSkeleton(title, emoji) {
-  $('content').innerHTML = dcaBotSkeleton(title, emoji);
+function renderDcaBotSkeleton(title, emoji, isBot4 = false) {
+  $('content').innerHTML = dcaBotSkeleton(title, emoji, isBot4);
   dcaPairKeys = null;
   dcaKnownTradeKeys = null;
+  dcaKnownCycleKeys = null;
   dcaChartLastTime = null;
   dcaCurrentBotId = null;
 
@@ -1066,12 +1136,16 @@ async function refreshDcaBotPage(estrategia) {
     const id = await getBotIdByEstrategia(estrategia);
     if (id === null) throw new Error('bot no encontrado');
     dcaCurrentBotId = id;
-    const [bot, trades, path, real, thoughts] = await Promise.all([
+    const [bot, trades, path, real, thoughts, cycles] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
-      fetchJson(`/api/competition/bot/${id}/trades?limit=50`),
+      // trades crudo (2026-08-24): Bot 3 lo sigue usando para su tabla plana
+      // de siempre — Bot 4 reemplazó esa tabla por "Historial de Ciclos"
+      // (ver /api/bot/4/cycles abajo), así que no hace falta pedirlo acá.
+      isBot4 ? Promise.resolve(null) : fetchJson(`/api/competition/bot/${id}/trades?limit=50`),
       fetchJson(`/api/bot/dca/${id}/path`),
       isBot4 ? fetchJson('/api/bot/4/balance-real').catch(() => null) : Promise.resolve(null),
       isBot4 ? fetchJson('/api/bot/4/thoughts').catch(() => null) : Promise.resolve(null),
+      isBot4 ? fetchJson('/api/bot/4/cycles').catch(() => null) : Promise.resolve(null),
     ]);
     $('dcaStatusPill').innerHTML = statusPillHtml(bot.activo);
     $('dcaModePill').innerHTML = modePillHtml(real && real.live ? 'live' : 'paper');
@@ -1110,8 +1184,16 @@ async function refreshDcaBotPage(estrategia) {
       <div class="kv-row"><span class="label">Take Profit</span><span class="value">${path.config.tpMinPct}% – ${path.config.tpMaxPct}%</span></div>
       <div class="kv-row"><span class="label">Máx. compras</span><span class="value">${path.config.maxCompras}</span></div>`;
 
-    const closed = trades.filter((t) => t.outcome !== 'open');
-    renderDcaHistoryIncremental(closed);
+    // Historial (2026-08-24): Bot 4 usa "Historial de Ciclos" (tarjetas por
+    // ciclo, ver renderDcaCyclesIncremental) — Bot 3 sigue con la tabla plana
+    // de siempre (no tiene /api/bot/4/cycles, ese endpoint es exclusivo de
+    // Bot 4).
+    if (isBot4) {
+      renderDcaCyclesIncremental(cycles || []);
+    } else {
+      const closed = trades.filter((t) => t.outcome !== 'open');
+      renderDcaHistoryIncremental(closed);
+    }
     $('dcaErrorBanner').innerHTML = '';
   } catch (err) {
     // Contenedor dedicado (2026-08-20, mismo criterio que Bot 2/Motor A).
@@ -1213,7 +1295,7 @@ const ROUTE_RENDER = {
   motora: renderMotorASkeleton,
   bot2: renderBot2Skeleton,
   bot3: () => renderDcaBotSkeleton('Bot 3 — DCA Agresivo', '📈'),
-  bot4: () => renderDcaBotSkeleton('Bot 4 — DCA BTC/ETH', '💰'),
+  bot4: () => renderDcaBotSkeleton('Bot 4 — DCA BTC/ETH', '💰', true),
   settings: renderSettingsSkeleton,
 };
 const ROUTE_REFRESH = {

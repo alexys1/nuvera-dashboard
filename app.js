@@ -50,6 +50,9 @@ const CACHE_TTL_MS = {
   '/api/bot/4/balance-real': CACHE_TTL_CRITICAL, // saldo real Binance — capital/balance cada 15s
   '/api/bot/4/thoughts': CACHE_TTL_CRITICAL, // "qué está pensando el bot" — cada 15s (2026-08-22, pedido explícito)
   '/api/bot/4/cycles': CACHE_TTL_DCA_TRADES, // Historial de Ciclos (2026-08-24) — misma cadencia que la tabla de trades que reemplaza
+  '/api/metrics/daily': CACHE_TTL_GENERAL, // página Métricas (2026-08-25) — agregados, no hace falta más frecuencia
+  '/api/metrics/monthly': CACHE_TTL_GENERAL,
+  '/api/metrics/top-trades': CACHE_TTL_GENERAL,
 };
 // Rutas dinámicas (con :id numérico en el medio) no matchean por string
 // exacto contra CACHE_TTL_MS — se clasifican por el sufijo del path. Los
@@ -1300,9 +1303,241 @@ async function refreshSettings() {
 }
 
 // =========================================================================
+// PÁGINA: MÉTRICAS (2026-08-25, pedido explícito) — calendario de ganancias,
+// gráfica de barras por día, resumen del mes y top trades. Todo escopeado a
+// Bot 4 (competitionDcaMotorA), solo trades CERRADOS reales (nunca capital
+// agregado a mano) — ver GET /api/metrics/daily|monthly|top-trades en
+// src/api/server.js del bot. El día del calendario se cruza con
+// /api/bot/4/cycles (ya usado en la página Bot 4, ver refreshDcaBotPage) para
+// mostrar el detalle de "trades de ese día" sin necesitar un endpoint nuevo.
+// =========================================================================
+const MET_DIAS_SEMANA = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+const MET_MESES_LARGOS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+// peruNow/peruDateKey: Perú no tiene horario de verano (siempre UTC-5) — se
+// usa el mismo offset fijo que el backend (ver horaPeruCompacta en
+// server.js) para que las claves "YYYY-MM-DD" del calendario coincidan
+// exactamente con el campo `fecha` que ya devuelve /api/metrics/daily (que sí
+// se calcula en Postgres con AT TIME ZONE, la fuente de verdad).
+function peruNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Lima' }));
+}
+function peruDateKey(iso) {
+  const d = new Date(new Date(iso).getTime() - 5 * 3600000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+function ensureHistogramChart(containerId) {
+  if (chartInstances[containerId]) return chartInstances[containerId];
+  const container = $(containerId);
+  if (!container) return null;
+  const chart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: container.clientHeight || 220,
+    layout: { background: { color: 'transparent' }, textColor: '#64748b', fontSize: 11 },
+    grid: { vertLines: { visible: false }, horzLines: { color: '#1c1c28' } },
+    rightPriceScale: { borderColor: '#2a2a3a' },
+    timeScale: { borderColor: '#2a2a3a', timeVisible: false, secondsVisible: false },
+    handleScroll: false,
+    handleScale: false,
+  });
+  const series = chart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
+  new ResizeObserver(() => { if (chartInstances[containerId]) chart.applyOptions({ width: container.clientWidth }); }).observe(container);
+  chartInstances[containerId] = { chart, series };
+  return chartInstances[containerId];
+}
+
+let metCalYear = null;
+let metCalMonth = null; // 0-indexed
+let metSelectedFecha = null; // "YYYY-MM-DD" en hora Perú, o null (nada seleccionado)
+let metDailyMap = {}; // fecha -> fila de /api/metrics/daily
+let metCyclesCache = []; // /api/bot/4/cycles, para el detalle "trades de ese día"
+
+function metricasSkeleton() {
+  return `
+    <div class="page-header">
+      <div class="ph-title">📈 MÉTRICAS — BOT 4</div>
+      <div class="ph-sub" style="font-size:13px; font-weight:400; color:var(--text-sec);">Solo ganancias REALES de trades cerrados (no incluye capital agregado a mano)</div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>📅 Calendario de ganancias</span>
+        <span style="display:flex; align-items:center; gap:10px;">
+          <button class="period-btn" id="metCalPrev">‹</button>
+          <span id="metCalLabel" style="min-width:130px; text-align:center; display:inline-block; font-weight:700; color:var(--text);">—</span>
+          <button class="period-btn" id="metCalNext">›</button>
+        </span>
+      </div>
+      <div class="metrics-calendar-weekdays">${MET_DIAS_SEMANA.map((d) => `<div class="mc-weekday">${d}</div>`).join('')}</div>
+      <div class="metrics-calendar" id="metCalendarGrid"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+
+    <div class="panel" id="metDayDetailPanel" style="display:none;">
+      <div class="panel-title" id="metDayDetailTitle">Trades del día</div>
+      <div id="metDayDetailBody"></div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-card-title">📊 Ganancias netas por día (USD)</div>
+      <div class="chart-el" id="metBarChartContainer"></div>
+      <div class="chart-placeholder" id="metBarChartPlaceholder" style="display:none;">Sin trades cerrados todavía.</div>
+    </div>
+
+    <div class="section-title">Resumen del mes</div>
+    <div class="stat-row" id="metSummaryRow"><div class="empty-state skeleton">Cargando…</div></div>
+
+    <div class="section-title">🏆 Top trades del mes</div>
+    <div class="metrics-top-grid">
+      <div class="panel">
+        <div class="panel-title">Mejores 5</div>
+        <div id="metTopBest"><div class="empty-state skeleton">Cargando…</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Peores 5</div>
+        <div id="metTopWorst"><div class="empty-state skeleton">Cargando…</div></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderMetCalendar() {
+  $('metCalLabel').textContent = `${MET_MESES_LARGOS[metCalMonth]} ${metCalYear}`;
+  // primerDiaSemana: 0=lunes...6=domingo (getUTCDay() da 0=domingo, se rota).
+  const primerDiaSemana = (new Date(Date.UTC(metCalYear, metCalMonth, 1)).getUTCDay() + 6) % 7;
+  const diasEnMes = new Date(Date.UTC(metCalYear, metCalMonth + 1, 0)).getUTCDate();
+
+  let html = '';
+  for (let i = 0; i < primerDiaSemana; i++) html += '<div class="mc-day empty"></div>';
+  for (let dia = 1; dia <= diasEnMes; dia++) {
+    const fecha = `${metCalYear}-${String(metCalMonth + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    const row = metDailyMap[fecha];
+    const clases = ['mc-day'];
+    if (row) clases.push(row.pnl >= 0 ? 'pos' : 'neg');
+    if (fecha === metSelectedFecha) clases.push('selected');
+    html += `<div class="${clases.join(' ')}" data-fecha="${fecha}">
+      <span class="mc-day-num">${dia}</span>
+      ${row ? `<span class="mc-day-pnl">${row.pnl >= 0 ? '+' : ''}${fmtUsd(row.pnl)}</span>` : ''}
+    </div>`;
+  }
+  $('metCalendarGrid').innerHTML = html;
+  $('metCalendarGrid').querySelectorAll('.mc-day[data-fecha]').forEach((el) => {
+    el.addEventListener('click', () => {
+      // Click de nuevo sobre el día ya seleccionado = deseleccionar (cierra el panel).
+      metSelectedFecha = metSelectedFecha === el.dataset.fecha ? null : el.dataset.fecha;
+      renderMetCalendar();
+      renderMetDayDetail();
+    });
+  });
+}
+
+function renderMetDayDetail() {
+  const panel = $('metDayDetailPanel');
+  if (!metSelectedFecha) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  const [y, m, d] = metSelectedFecha.split('-');
+  $('metDayDetailTitle').textContent = `Trades del ${d}/${m}/${y}`;
+
+  const ciclosDelDia = metCyclesCache.filter((c) => peruDateKey(c.cierreTs) === metSelectedFecha);
+  $('metDayDetailBody').innerHTML = ciclosDelDia.length === 0
+    ? '<div class="empty-state">Sin ciclos cerrados ese día.</div>'
+    : ciclosDelDia.map((c) => `
+      <div class="kv-row">
+        <span class="label">${esc(c.par)} · ${c.numCompras} compras · ${formatTimePeruCompact(c.cierreTs)}</span>
+        <span class="value ${pnlClass(c.pnlTotal)}">${fmtUsd(c.pnlTotal)}</span>
+      </div>`).join('');
+}
+
+function loadMetBarChart(dailyData) {
+  if (!dailyData || dailyData.length === 0) {
+    $('metBarChartContainer').style.display = 'none';
+    $('metBarChartPlaceholder').style.display = 'flex';
+    return;
+  }
+  $('metBarChartContainer').style.display = 'block';
+  $('metBarChartPlaceholder').style.display = 'none';
+  const points = dailyData
+    .map((d) => ({
+      time: Math.floor(new Date(`${d.fecha}T00:00:00Z`).getTime() / 1000),
+      value: d.pnl,
+      color: d.pnl >= 0 ? '#00ff88' : '#ff4444',
+    }))
+    .sort((a, b) => a.time - b.time);
+  const { chart, series } = ensureHistogramChart('metBarChartContainer');
+  series.setData(points);
+  chart.timeScale().fitContent();
+}
+
+function renderMetSummary(m) {
+  if (!m) { $('metSummaryRow').innerHTML = '<div class="empty-state">No se pudo cargar.</div>'; return; }
+  $('metSummaryRow').innerHTML = `
+    <div class="stat-box"><div class="stat-label">Días operando</div><div class="stat-value">${m.diasOperando}</div></div>
+    <div class="stat-box"><div class="stat-label">Trades cerrados</div><div class="stat-value">${m.tradesCerrados}</div></div>
+    <div class="stat-box"><div class="stat-label">Ganancia total</div><div class="stat-value ${pnlClass(m.gananciaTotal)}">${fmtUsd(m.gananciaTotal)}</div></div>
+    <div class="stat-box"><div class="stat-label">Mejor día</div><div class="stat-value pnl-pos">${m.mejorDia ? `${m.mejorDia.fecha}` : '—'}</div><div class="stat-sub">${m.mejorDia ? fmtUsd(m.mejorDia.pnl) : ''}</div></div>
+    <div class="stat-box"><div class="stat-label">Peor día</div><div class="stat-value pnl-neg">${m.peorDia ? `${m.peorDia.fecha}` : '—'}</div><div class="stat-sub">${m.peorDia ? fmtUsd(m.peorDia.pnl) : ''}</div></div>
+    <div class="stat-box"><div class="stat-label">Win Rate del mes</div><div class="stat-value">${m.winRate}%</div></div>
+    <div class="stat-box"><div class="stat-label">Profit Factor</div><div class="stat-value">${m.profitFactor !== null ? m.profitFactor.toFixed(2) : '∞'}</div></div>
+  `;
+}
+
+function renderMetTopTrades(top) {
+  const renderList = (list) => (!list || list.length === 0
+    ? '<div class="empty-state">Sin trades este mes.</div>'
+    : list.map((t) => `
+      <div class="kv-row">
+        <span class="label">${esc(t.pair.split('/')[0])} ${esc(t.horaPeru)}</span>
+        <span class="value ${pnlClass(t.pnl)}">${fmtUsd(t.pnl)}</span>
+      </div>`).join(''));
+  $('metTopBest').innerHTML = renderList(top && top.mejores);
+  $('metTopWorst').innerHTML = renderList(top && top.peores);
+}
+
+function renderMetricasSkeleton() {
+  const ahora = peruNow();
+  metCalYear = ahora.getFullYear();
+  metCalMonth = ahora.getMonth();
+  metSelectedFecha = null;
+  metDailyMap = {};
+  metCyclesCache = [];
+  $('content').innerHTML = metricasSkeleton();
+  $('metCalPrev').addEventListener('click', () => {
+    metCalMonth -= 1;
+    if (metCalMonth < 0) { metCalMonth = 11; metCalYear -= 1; }
+    renderMetCalendar();
+  });
+  $('metCalNext').addEventListener('click', () => {
+    metCalMonth += 1;
+    if (metCalMonth > 11) { metCalMonth = 0; metCalYear += 1; }
+    renderMetCalendar();
+  });
+}
+
+async function refreshMetricas() {
+  try {
+    const [daily, monthly, top, cycles] = await Promise.all([
+      fetchJson('/api/metrics/daily'),
+      fetchJson('/api/metrics/monthly'),
+      fetchJson('/api/metrics/top-trades'),
+      fetchJson('/api/bot/4/cycles').catch(() => []),
+    ]);
+    metDailyMap = {};
+    daily.forEach((d) => { metDailyMap[d.fecha] = d; });
+    metCyclesCache = cycles || [];
+    renderMetCalendar();
+    renderMetDayDetail();
+    loadMetBarChart(daily);
+    renderMetSummary(monthly);
+    renderMetTopTrades(top);
+  } catch (err) {
+    $('metSummaryRow').innerHTML = '<div class="empty-state">No se pudo cargar la información de métricas.</div>';
+  }
+}
+
+// =========================================================================
 // ROUTER
 // =========================================================================
-const ROUTES = ['overview', 'motorb', 'motora', 'bot2', 'bot3', 'bot4', 'settings'];
+const ROUTES = ['overview', 'metricas', 'motorb', 'motora', 'bot2', 'bot3', 'bot4', 'settings'];
 // RENDER = construye el HTML de la página (skeleton), UNA sola vez por
 // visita a la ruta. REFRESH = pide datos frescos y actualiza SOLO texto/
 // clases de elementos ya existentes — es lo único que corre en cada poll
@@ -1312,6 +1547,7 @@ const ROUTES = ['overview', 'motorb', 'motora', 'bot2', 'bot3', 'bot4', 'setting
 // de scroll en el polling silencioso.
 const ROUTE_RENDER = {
   overview: renderOverviewSkeleton,
+  metricas: renderMetricasSkeleton,
   motorb: renderMotorBSkeleton,
   motora: renderMotorASkeleton,
   bot2: renderBot2Skeleton,
@@ -1321,6 +1557,7 @@ const ROUTE_RENDER = {
 };
 const ROUTE_REFRESH = {
   overview: refreshOverview,
+  metricas: refreshMetricas,
   motorb: refreshMotorB,
   motora: refreshMotorA,
   bot2: refreshBot2,

@@ -183,12 +183,13 @@ function investedFreeHtml(capitalInvertido, capitalLibre) {
   return `${fmtUsd(capitalInvertido)} invertido · ${fmtUsd(capitalLibre)} libre`;
 }
 const RANK_MEDALS = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-// formatTimePeru (2026-08-23, pedido explícito: "columna con hora de Perú
-// UTC-5" en DCA Execution History) — dos líneas en la misma celda, hora
-// servidor (UTC) arriba en gris y hora Perú abajo en blanco/negrita, para
-// que el usuario no tenga que restar 5h a mano en cada trade.
-function formatTimePeru(iso) {
-  if (!iso) return '—';
+// timePeruParts (2026-08-23, pedido explícito: "columna con hora de Perú
+// UTC-5") — cálculo compartido de hora servidor (UTC) + hora Perú
+// (UTC-5) a partir de un ISO, sin marcado propio, para que cualquier vista
+// (celda de tabla, línea de texto de una tarjeta, etc.) arme el HTML que le
+// convenga con los mismos dos strings.
+function timePeruParts(iso) {
+  if (!iso) return null;
   const fecha = new Date(iso);
   const utcStr = fecha.toLocaleString('es-PE', {
     timeZone: 'UTC',
@@ -204,7 +205,25 @@ function formatTimePeru(iso) {
     hour: '2-digit',
     minute: '2-digit',
   });
-  return `<span class="time-utc">${utcStr} UTC</span><span class="time-peru">${peruStr} PE</span>`;
+  return { utcStr, peruStr };
+}
+// formatTimePeru: dos líneas en la misma celda, hora servidor (UTC) arriba
+// en gris y hora Perú abajo en blanco/negrita, para que el usuario no tenga
+// que restar 5h a mano en cada trade (tabla de transacciones individuales).
+function formatTimePeru(iso) {
+  const parts = timePeruParts(iso);
+  if (!parts) return '—';
+  return `<span class="time-utc">${parts.utcStr} UTC</span><span class="time-peru">${parts.peruStr} PE</span>`;
+}
+// formatTimePeruCompact (2026-08-25, pedido explícito, "Historial de
+// Ciclos: agregar hora de Perú junto a la hora del servidor" — mismo
+// timePeruParts que formatTimePeru, pero en una sola línea inline en vez de
+// dos <span> en bloque, porque acá va dentro del texto corrido de
+// cycle-meta, no en una celda de tabla dedicada) — "23/08 06:26 UTC · 01:26 PE".
+function formatTimePeruCompact(iso) {
+  const parts = timePeruParts(iso);
+  if (!parts) return '—';
+  return `${parts.utcStr} UTC · ${parts.peruStr} PE`;
 }
 
 // =========================================================================
@@ -908,7 +927,9 @@ function cycleCardHtml(c, extraClass = '') {
         <div class="cycle-summary-row">
           <div class="cycle-summary-main">
             <span class="cycle-pair">${esc(c.par)}</span>
-            <span class="cycle-meta">${esc(c.fechaInicio)} → ${esc(c.fechaFin)} (${esc(c.duracion)}) · ${c.numCompras} compras · ${fmtUsd(c.totalInvertido)} invertido</span>
+            <span class="cycle-time-row">Inicio: ${formatTimePeruCompact(c.inicioTs)}</span>
+            <span class="cycle-time-row">Fin: ${formatTimePeruCompact(c.cierreTs)}</span>
+            <span class="cycle-meta">(${esc(c.duracion)}) · ${c.numCompras} compras · ${fmtUsd(c.totalInvertido)} invertido</span>
           </div>
           <span class="cycle-outcome ${pnlClass(c.pnlTotal)}">${c.outcome === 'win' ? '✅' : '❌'} ${fmtUsd(c.pnlTotal)}<span class="cycle-chevron"> ▶</span></span>
         </div>

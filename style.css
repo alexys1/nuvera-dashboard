@@ -297,6 +297,7 @@ table.data-table tr.row-new { animation: row-fade-in 1.2s ease-out; }
 .cycle-summary-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .cycle-summary-main { display: flex; flex-direction: column; gap: 2px; }
 .cycle-pair { font-weight: 700; font-size: 14px; }
+.cycle-time-row { font-size: 11.5px; color: var(--text-sec); }
 .cycle-meta { font-size: 11.5px; color: var(--text-sec); }
 .cycle-outcome { font-weight: 700; font-size: 14px; white-space: nowrap; }
 .cycle-chevron { color: var(--text-sec); font-size: 11px; transition: transform 0.15s ease; }

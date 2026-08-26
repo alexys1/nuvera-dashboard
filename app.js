@@ -593,7 +593,7 @@ function accumulationPairBlock(label, p) {
       ${p.nextTriggerPrice !== null ? `
         <div class="kv-row" style="margin-top:8px;"><span class="label">Próximo trigger</span><span class="value">${fmtUsdPrecise(p.nextTriggerPrice)}</span></div>
         <div class="kv-row"><span class="label">Drop necesario</span><span class="value pnl-neg">-${p.dropRequiredPct}%</span></div>
-      ` : `<div class="stat-sub" style="margin-top:8px;">${p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.'}</div>`}
+      ` : `<div class="stat-sub" style="margin-top:8px;">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`}
     </div>`;
 }
 
@@ -838,10 +838,16 @@ function updateAccumulationPairBlock(idPrefix, p) {
   ` : '';
   $(`${idPrefix}-progress-fill`).style.width = `${progressPct}%`;
   $(`${idPrefix}-progress-pct`).textContent = `${progressPct}%`;
+  // triggerNote (2026-08-26, pedido explícito, "si no es posible consultar
+  // ATR, mostrar 'Drop dinámico (ATR)' sin precio exacto, para no confundir
+  // con un valor incorrecto"): server.js solo lo manda cuando el ciclo sigue
+  // acumulando pero dynamicDropPctForPair no pudo leer el ATR real (cayó al
+  // fallback estático) — en ese caso NO llega nextTriggerPrice, se muestra
+  // este aviso en vez del mensaje genérico de "esperando caída".
   $(`${idPrefix}-trigger-block`).innerHTML = p.nextTriggerPrice !== null ? `
     <div class="kv-row" style="margin-top:8px;"><span class="label">Próximo trigger</span><span class="value">${fmtUsdPrecise(p.nextTriggerPrice)}</span></div>
     <div class="kv-row"><span class="label">Drop necesario</span><span class="value pnl-neg">-${p.dropRequiredPct}%</span></div>
-  ` : `<div class="stat-sub" style="margin-top:8px;">${p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.'}</div>`;
+  ` : `<div class="stat-sub" style="margin-top:8px;">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`;
 }
 function renderAccumulationPathIncremental(pares) {
   const pairEntries = Object.entries(pares);

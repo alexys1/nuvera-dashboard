@@ -1484,7 +1484,9 @@ function renderMetSummary(m) {
   $('metSummaryRow').innerHTML = `
     <div class="stat-box"><div class="stat-label">Días operando</div><div class="stat-value">${m.diasOperando}</div></div>
     <div class="stat-box"><div class="stat-label">Trades cerrados</div><div class="stat-value">${m.tradesCerrados}</div></div>
-    <div class="stat-box"><div class="stat-label">Ganancia total</div><div class="stat-value ${pnlClass(m.gananciaTotal)}">${fmtUsd(m.gananciaTotal)}</div></div>
+    <div class="stat-box"><div class="stat-label">Ganancia bruta</div><div class="stat-value ${pnlClass(m.pnlBruto)}">${fmtUsd(m.pnlBruto)}</div></div>
+    <div class="stat-box"><div class="stat-label">Fees pagados</div><div class="stat-value pnl-neg">-${fmtUsd(Math.abs(m.feesTotal))}</div></div>
+    <div class="stat-box"><div class="stat-label">Ganancia NETA</div><div class="stat-value ${pnlClass(m.pnlNeto)}">${fmtUsd(m.pnlNeto)} ${m.pnlNeto >= 0 ? '✅' : ''}</div></div>
     <div class="stat-box"><div class="stat-label">Mejor día</div><div class="stat-value pnl-pos">${m.mejorDia ? `${m.mejorDia.fecha}` : '—'}</div><div class="stat-sub">${m.mejorDia ? fmtUsd(m.mejorDia.pnl) : ''}</div></div>
     <div class="stat-box"><div class="stat-label">Peor día</div><div class="stat-value pnl-neg">${m.peorDia ? `${m.peorDia.fecha}` : '—'}</div><div class="stat-sub">${m.peorDia ? fmtUsd(m.peorDia.pnl) : ''}</div></div>
     <div class="stat-box"><div class="stat-label">Win Rate del mes</div><div class="stat-value">${m.winRate}%</div></div>

@@ -1055,11 +1055,15 @@ function cambio7dInfo(pct) {
 }
 function renderContextoSemanal(contextoSemanal) {
   if (!contextoSemanal) return '';
-  const { btcCambio7d, ethCambio7d } = contextoSemanal;
+  // BNB agregado (2026-08-27, pedido explícito, tercer par de Bot 4) — mismo
+  // criterio que btc/ethCambio7d de arriba, ver GET /api/bot/4/thoughts.
+  const { btcCambio7d, ethCambio7d, bnbCambio7d } = contextoSemanal;
   const btc = cambio7dInfo(btcCambio7d);
   const eth = cambio7dInfo(ethCambio7d);
-  const sobreextendido = (btcCambio7d !== null && btcCambio7d > 10) || (ethCambio7d !== null && ethCambio7d > 10);
-  const conDescuento = !sobreextendido && ((btcCambio7d !== null && btcCambio7d < -10) || (ethCambio7d !== null && ethCambio7d < -10));
+  const bnb = cambio7dInfo(bnbCambio7d);
+  const cambios = [btcCambio7d, ethCambio7d, bnbCambio7d];
+  const sobreextendido = cambios.some((c) => c !== null && c !== undefined && c > 10);
+  const conDescuento = !sobreextendido && cambios.some((c) => c !== null && c !== undefined && c < -10);
   const resumen = sobreextendido
     ? '<div class="stat-sub" style="color:var(--yellow); margin-top:4px;">⚠️ Mercado sobreextendido — bot más cauteloso</div>'
     : conDescuento
@@ -1069,6 +1073,7 @@ function renderContextoSemanal(contextoSemanal) {
     <div class="stat-sub" style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">📈 CONTEXTO SEMANAL:</div>
     <div class="kv-row"><span class="label">BTC</span><span class="value" style="color:${btc.color};">${btc.texto} esta semana${btc.icon}</span></div>
     <div class="kv-row"><span class="label">ETH</span><span class="value" style="color:${eth.color};">${eth.texto} esta semana${eth.icon}</span></div>
+    <div class="kv-row"><span class="label">BNB</span><span class="value" style="color:${bnb.color};">${bnb.texto} esta semana${bnb.icon}</span></div>
     ${resumen}`;
 }
 function renderThoughtsPanel(data) {

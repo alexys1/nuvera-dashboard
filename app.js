@@ -7,7 +7,7 @@
 // stats, /api/bot/grid/levels, /api/bot/dca/:id/path, /api/bot/motora/stats).
 
 // ---------- Config / API base (mismo mecanismo que el dashboard anterior) ----------
-const DEFAULT_API_BASE = 'https://shorter-sprung-process.ngrok-free.dev';
+const DEFAULT_API_BASE = 'https://basketball-date-introducing-est.trycloudflare.com';
 function resolveApiBase() {
   const url = new URL(window.location.href);
   const fromQuery = url.searchParams.get('api');
@@ -77,7 +77,7 @@ async function fetchJson(path, { force = false } = {}) {
   const cached = cache.get(path);
   if (!force && cached && Date.now() - cached.fetchedAt < ttl) return cached.data;
 
-  const res = await fetch(`${API_BASE}${path}`, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+  const res = await fetch(`${API_BASE}${path}`);
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   const data = await res.json();
   cache.set(path, { data, fetchedAt: Date.now() });
@@ -1252,7 +1252,7 @@ function settingsSkeleton() {
     </div>
     <div class="panel">
       <div class="settings-field">
-        <label>API base (ngrok)</label>
+        <label>API base (Cloudflare Tunnel)</label>
         <input type="text" id="apiBaseInput" value="${esc(API_BASE)}">
       </div>
       <button class="btn" id="apiBaseSave">Guardar y recargar</button>

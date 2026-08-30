@@ -2,8 +2,8 @@
 
 Dashboard estático (HTML/CSS/JS puro, sin build) que muestra el estado del
 bot de trading en tiempo real. Lee datos de la API de solo lectura del bot
-(`src/api/server.js`, puerto 3001) expuesta a internet vía **ngrok** con
-HTTPS, y se aloja gratis en GitHub Pages.
+(`src/api/server.js`, puerto 3001) expuesta a internet vía **Cloudflare
+Tunnel** con HTTPS, y se aloja gratis en GitHub Pages.
 
 La API **solo tiene endpoints GET**. No expone keys de Binance/Telegram/DB,
 no permite modificar el bot desde la web.
@@ -52,14 +52,18 @@ Motor B, igual que el tab Competencia del diseño anterior).
 ## Arquitectura actual
 
 ```
-GitHub Pages (HTTPS)  →  ngrok (HTTPS, dominio fijo)  →  localhost:3001 (API del bot)
+GitHub Pages (HTTPS)  →  Cloudflare Tunnel (HTTPS, quick tunnel)  →  localhost:3001 (API del bot)
 ```
 
 - **API**: `pm2` — proceso `nuvera-api`, puerto 3001, solo en `localhost`.
-- **Túnel**: `ngrok.service` (systemd, arranca solo con el servidor) expone
-  esa API en `https://shorter-sprung-process.ngrok-free.dev`.
+- **Túnel**: `cloudflared.service` (systemd, arranca solo con el servidor)
+  expone esa API con un *quick tunnel* (`cloudflared tunnel --url
+  http://localhost:3001`, sin dominio propio ni login). Genera una URL
+  aleatoria tipo `https://palabras-random.trycloudflare.com` **que cambia
+  cada vez que se reinicia el servicio** — a diferencia de ngrok no hay
+  dominio fijo en el plan gratis sin cuenta/dominio propio en Cloudflare.
 - **Dashboard**: este directorio (`index.html` + `app.js`), servido por
-  GitHub Pages, apunta a esa URL fija de ngrok.
+  GitHub Pages, apunta a esa URL de Cloudflare Tunnel.
 
 ## Levantar/gestionar la API con PM2
 
@@ -73,25 +77,33 @@ pm2 logs nuvera-api  # ver logs
 La API es un proceso **separado** del bot principal (`nuvera-trading-bot`) y
 de `kamino-rust` — reiniciarla/detenerla no afecta a ninguno de los dos.
 
-## Gestionar el túnel de ngrok
+## Gestionar el túnel de Cloudflare
 
-Corre como servicio systemd (`/etc/systemd/system/ngrok.service`), habilitado
-para arrancar solo con el servidor:
+Corre como servicio systemd (`/etc/systemd/system/cloudflared.service`),
+habilitado para arrancar solo con el servidor:
 
 ```bash
-systemctl status ngrok    # ver estado
-systemctl restart ngrok   # reiniciar el túnel
-journalctl -u ngrok -f    # ver logs en vivo
+systemctl status cloudflared    # ver estado
+systemctl restart cloudflared   # reiniciar el túnel (¡genera una URL nueva!)
+journalctl -u cloudflared -f    # ver logs en vivo
+tail -f /root/nuvera-trading-bot/logs/cloudflared.log  # logs del servicio
 ```
 
-El dominio (`shorter-sprung-process.ngrok-free.dev`) es un **dominio
-estático reservado** en el panel de ngrok (Cloud Edge → Domains) — no cambia
-entre reinicios, a diferencia de un túnel `ngrok http 3001` sin `--url`.
+⚠️ **Es un *quick tunnel*** (`cloudflared tunnel --url http://localhost:3001`,
+sin `cloudflared tunnel login` ni dominio propio): cada `systemctl restart
+cloudflared` genera una URL nueva (`https://palabras-random.trycloudflare.com`).
+Después de reiniciar el servicio, sacá la URL nueva del log:
 
-⚠️ Si alguna vez el túnel falla con `ERR_NGROK_334` ("endpoint already
-online"), significa que hay otra sesión de ngrok activa en la misma cuenta
-(otro server, tu PC, etc). Revisá `dashboard.ngrok.com` → Agents/Endpoints y
-cerrala ahí — no se puede desde este servidor.
+```bash
+grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" /root/nuvera-trading-bot/logs/cloudflared.log | tail -1
+```
+
+y actualizala en `app.js` (`DEFAULT_API_BASE`, ver abajo) + push a GitHub —
+o pasala como `?api=` mientras tanto (ver sección siguiente).
+
+Si en algún momento se registra un dominio propio en Cloudflare, se puede
+migrar a un *named tunnel* (`cloudflared tunnel login` + `create` + `route
+dns`) para tener una URL fija que no cambie entre reinicios.
 
 ## Publicar/actualizar el dashboard en GitHub Pages
 
@@ -115,7 +127,7 @@ URL que usa el dashboard, de más a menos cómoda:
 **a) Parámetro en la URL (no toca archivos, para probar rápido):**
 
 ```
-https://TU_USUARIO.github.io/nuvera-dashboard/?api=https://nueva-url.ngrok-free.dev
+https://TU_USUARIO.github.io/nuvera-dashboard/?api=https://nueva-url.trycloudflare.com
 ```
 
 El navegador la guarda en `localStorage` y las próximas visitas ya no
@@ -125,19 +137,10 @@ necesitan el parámetro (mismo navegador/dispositivo).
 `app.js`:
 
 ```js
-const DEFAULT_API_BASE = 'https://shorter-sprung-process.ngrok-free.dev';
+const DEFAULT_API_BASE = 'https://basketball-date-introducing-est.trycloudflare.com';
 ```
 
 y hacer commit/push.
-
-## Nota técnica: header de ngrok
-
-Los túneles gratis de ngrok muestran una página HTML de advertencia ante
-requests con user-agent de navegador (para evitar que bots anónimos abusen
-del túnel) — eso rompería el `fetch()` del dashboard si no se avisa. Por eso
-`app.js` manda el header `ngrok-skip-browser-warning: true` en cada request;
-si armás tu propio cliente contra esta API detrás de ngrok, hace falta ese
-mismo header.
 
 ## Probar la API directamente
 
@@ -145,8 +148,8 @@ mismo header.
 # Desde el servidor
 curl http://localhost:3001/api/status
 
-# Desde cualquier lugar, vía ngrok
-curl -H "ngrok-skip-browser-warning: true" https://shorter-sprung-process.ngrok-free.dev/api/status
+# Desde cualquier lugar, vía Cloudflare Tunnel
+curl https://basketball-date-introducing-est.trycloudflare.com/api/status
 ```
 
 Debería devolver un JSON como:
@@ -155,14 +158,14 @@ Debería devolver un JSON como:
 {"estado":"operando","capital":200,"fondoServidor":0.1,"fondoServidorMeta":25,"tradesHoy":35,"winsHoy":10,"lossesHoy":25,"winrateHoy":28.6,"pnlHoy":-0.24,"pnlTotal":-0.28,"fearGreed":30,"fearGreedLabel":"Miedo","ultimoTrade":"2026-08-10 16:54 UTC","fondoServidorEtaDias":1730}
 ```
 
-## Abrir el firewall (solo si no usás ngrok)
+## Abrir el firewall (solo si no usás el túnel)
 
-Si en algún momento exponés el puerto 3001 directo (sin ngrok de por medio),
-hay que permitirlo en el firewall del servidor:
+Si en algún momento exponés el puerto 3001 directo (sin Cloudflare Tunnel de
+por medio), hay que permitirlo en el firewall del servidor:
 
 ```bash
 sudo ufw allow 3001/tcp
 ```
 
-Con ngrok de por medio (setup actual) **no hace falta** — el túnel sale
-desde el servidor hacia afuera, no requiere puertos entrantes abiertos.
+Con el túnel de por medio (setup actual) **no hace falta** — sale desde el
+servidor hacia afuera, no requiere puertos entrantes abiertos.

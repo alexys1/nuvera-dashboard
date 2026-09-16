@@ -1,47 +1,55 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-bs-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Nuvera Bot — Bot 4</title>
 <meta name="description" content="Dashboard en vivo de Bot 4, el bot de trading DCA de Nuvera que opera con dinero real en Binance">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js" defer></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="app">
-  <button class="hamburger" id="hamburgerBtn" aria-label="Abrir menú">☰</button>
-
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <span class="brand-icon">⚡</span>
-      <div>
-        <div class="brand-name">NUVERA BOT</div>
-        <div class="brand-sub"><span class="live-dot"></span>Bot 4 · Dinero real</div>
+<div class="d-flex">
+  <div class="offcanvas-lg offcanvas-start bg-body-tertiary border-end" tabindex="-1" id="sidebar" style="width: 240px;">
+    <div class="offcanvas-header d-lg-none">
+      <h5 class="offcanvas-title">Menú</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#sidebar" aria-label="Cerrar"></button>
+    </div>
+    <div class="offcanvas-body d-flex flex-column p-3">
+      <div class="d-flex align-items-center mb-4">
+        <span class="fs-3 me-2">⚡</span>
+        <div>
+          <div class="fw-bold">NUVERA BOT</div>
+          <div class="small text-body-secondary d-flex align-items-center gap-1"><span class="live-dot"></span>Bot 4 · Dinero real</div>
+        </div>
       </div>
+
+      <ul class="nav nav-pills flex-column gap-1 mb-auto" id="sidebarNav">
+        <li class="nav-item"><button class="nav-link w-100 text-start" data-route="inicio">📊 Inicio</button></li>
+        <li class="nav-item"><button class="nav-link w-100 text-start" data-route="posiciones">💰 Posiciones</button></li>
+        <li class="nav-item"><button class="nav-link w-100 text-start" data-route="historial">📜 Historial</button></li>
+        <li class="nav-item"><button class="nav-link w-100 text-start" data-route="metricas">📈 Métricas</button></li>
+      </ul>
+      <hr>
+      <button class="nav-link text-start p-2" data-route="settings">⚙️ Settings</button>
     </div>
+  </div>
 
-    <nav class="sidebar-nav">
-      <button class="nav-item" data-route="inicio"><span class="nav-icon">📊</span><span>Inicio</span></button>
-      <button class="nav-item" data-route="posiciones"><span class="nav-icon">💰</span><span>Posiciones</span></button>
-      <button class="nav-item" data-route="historial"><span class="nav-icon">📜</span><span>Historial</span></button>
-      <button class="nav-item" data-route="metricas"><span class="nav-icon">📈</span><span>Métricas</span></button>
-    </nav>
-
-    <div class="sidebar-footer">
-      <button class="nav-item" data-route="settings"><span class="nav-icon">⚙️</span><span>Settings</span></button>
+  <div class="flex-grow-1" style="min-width: 0;">
+    <div class="d-lg-none d-flex align-items-center p-2 border-bottom sticky-top bg-body">
+      <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="offcanvas" data-bs-target="#sidebar" aria-controls="sidebar">☰</button>
+      <span class="ms-2 fw-bold">NUVERA BOT</span>
     </div>
-  </aside>
-
-  <div class="sidebar-overlay" id="sidebarOverlay"></div>
-
-  <main class="content" id="content">
-    <div class="empty-state">Cargando…</div>
-  </main>
+    <main class="container-fluid p-3 p-lg-4" id="content" style="max-width: 1280px;">
+      <div class="text-center text-body-secondary py-5">Cargando…</div>
+    </main>
+  </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

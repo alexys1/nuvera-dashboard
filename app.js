@@ -1,12 +1,15 @@
-// Dashboard Nuvera Bot (2026-09-16, rediseño: "todo gira en torno a Bot 4")
+// Dashboard Nuvera Bot (2026-09-16, 4to rediseño: migración a Bootstrap 5)
 // — el sistema quedó reducido a un solo bot operando con dinero real
 // (Bot 2, Bot 3, Motor A y Motor B fueron desactivados en el backend, ver
-// BOT4_LIVE_FOCUS en nuvera-trading-bot/src/core/bot.js), así que este
-// dashboard dejó de ser un router de 5 bots en competencia para ser la vista
-// de un solo bot: Inicio (capital + gráfica), Posiciones (saldo real
-// Binance + accumulation path + qué piensa el bot), Historial (ciclos
-// cerrados) y Métricas (calendario/resumen mensual). Vanilla JS, sin
-// frameworks, sin build step (se sirve tal cual desde GitHub Pages).
+// BOT4_LIVE_FOCUS en nuvera-trading-bot/src/core/bot.js). Pedido explícito:
+// "no hay como usar bootstrap, diseños pre establecidos" — en vez de seguir
+// afinando CSS a mano (sin poder ver el resultado renderizado), el layout
+// ahora se apoya en componentes de Bootstrap 5.3 (cards, grid, badges,
+// accordion, offcanvas para el sidebar mobile, tema oscuro nativo vía
+// data-bs-theme) vía CDN — solo quedan a medida las piezas que Bootstrap no
+// tiene: colores por cripto, anillo de progreso SVG, donut de capital,
+// calendario de métricas. Sin build step (se sirve tal cual desde GitHub
+// Pages).
 
 // ---------- Config / API base ----------
 const DEFAULT_API_BASE = 'https://basketball-date-introducing-est.trycloudflare.com';
@@ -25,8 +28,43 @@ const $ = (id) => document.getElementById(id);
 const fmtUsd = (n) => (n === null || n === undefined ? '—' : `$${Number(n).toFixed(2)}`);
 const fmtUsdPrecise = (n, d = 2) => (n === null || n === undefined ? '—' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`);
 const fmtPct = (n, digits = 1) => (n === null || n === undefined ? '—' : `${n >= 0 ? '+' : ''}${Number(n).toFixed(digits)}%`);
-const pnlClass = (n) => (n === null || n === undefined ? '' : (n >= 0 ? 'pnl-pos' : 'pnl-neg'));
+// pnlClass: clases semánticas de Bootstrap (text-success/text-danger) en vez
+// de clases propias — se usan tal cual en cualquier template de acá abajo.
+const pnlClass = (n) => (n === null || n === undefined ? '' : (n >= 0 ? 'text-success' : 'text-danger'));
 const esc = (s) => String(s ?? '').replace(/</g, '&lt;');
+
+// ---------- Helpers de markup Bootstrap reusados en todas las páginas ----------
+// statBoxHtml: card de stat con id vacío (lo llena refreshX() en cada poll).
+function statBoxHtml(label, id) {
+  return `<div class="col"><div class="card h-100"><div class="card-body py-2 px-3">
+    <div class="text-body-secondary small text-uppercase fw-bold">${label}</div>
+    <div class="fs-5 fw-bold" id="${id}">—</div>
+  </div></div></div>`;
+}
+// statBoxValueHtml: mismo card pero con el valor ya resuelto (para bloques
+// que se reconstruyen enteros en cada refresh, como Métricas).
+function statBoxValueHtml(label, valueHtml) {
+  return `<div class="col"><div class="card h-100"><div class="card-body py-2 px-3">
+    <div class="text-body-secondary small text-uppercase fw-bold">${label}</div>
+    <div class="fs-5 fw-bold">${valueHtml}</div>
+  </div></div></div>`;
+}
+// kv: fila "label: valor" — reemplaza el viejo .kv-row a mano, con
+// utilidades de Bootstrap (d-flex/justify-content-between) en vez de CSS
+// propio.
+function kv(label, valueHtml, valueClass = '') {
+  return `<div class="d-flex justify-content-between align-items-baseline py-1 small border-bottom border-secondary-subtle">
+    <span class="text-body-secondary">${label}</span>
+    <span class="fw-bold ${valueClass}">${valueHtml}</span>
+  </div>`;
+}
+// cardHtml: panel genérico título + cuerpo.
+function cardHtml(titleHtml, bodyHtml, extraClass = '') {
+  return `<div class="card mb-3 ${extraClass}"><div class="card-body">
+    <div class="card-title text-uppercase text-body-secondary small fw-bold mb-2">${titleHtml}</div>
+    ${bodyHtml}
+  </div></div>`;
+}
 
 // ---------- Caché en memoria, TTL por tipo de dato ----------
 const CACHE_TTL_CRITICAL = 15_000; // capital, PnL, saldo real — headers de cada página
@@ -90,20 +128,23 @@ async function getBot4Id() {
   return bot4IdCache;
 }
 
-// ---------- Sidebar / mobile ----------
-function openSidebar() { $('sidebar').classList.add('open'); $('sidebarOverlay').classList.add('open'); }
-function closeSidebar() { $('sidebar').classList.remove('open'); $('sidebarOverlay').classList.remove('open'); }
-$('hamburgerBtn').addEventListener('click', openSidebar);
-$('sidebarOverlay').addEventListener('click', closeSidebar);
-
-document.querySelectorAll('.nav-item[data-route]').forEach((btn) => {
+// ---------- Sidebar (Bootstrap Offcanvas, ver index.html #sidebar) ----------
+document.querySelectorAll('.nav-link[data-route]').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (window.location.hash === `#${btn.dataset.route}`) return;
     window.location.hash = btn.dataset.route;
   });
 });
+function closeMobileSidebar() {
+  const el = $('sidebar');
+  const oc = bootstrap.Offcanvas.getInstance(el);
+  if (oc) oc.hide();
+}
 
 // ---------- Lightweight Charts: helper genérico ----------
+// Colores de grilla/eje en rgba(255,255,255,x) en vez de hex fijos: quedan
+// legibles sobre cualquier tono oscuro de Bootstrap sin tener que leer sus
+// custom properties en runtime (Canvas no resuelve var(--bs-...) directo).
 const chartInstances = {}; // containerId -> { chart, series }
 function clearAllCharts() {
   Object.values(chartInstances).forEach((c) => { try { c.chart.remove(); } catch (err) { /* ya destruido */ } });
@@ -116,10 +157,10 @@ function ensureAreaChart(containerId, color = '#00ff88') {
   const chart = LightweightCharts.createChart(container, {
     width: container.clientWidth,
     height: container.clientHeight || 220,
-    layout: { background: { color: 'transparent' }, textColor: '#64748b', fontSize: 11 },
-    grid: { vertLines: { visible: false }, horzLines: { color: '#1c1c28' } },
-    rightPriceScale: { borderColor: '#2a2a3a' },
-    timeScale: { borderColor: '#2a2a3a', timeVisible: true, secondsVisible: false },
+    layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { visible: false }, horzLines: { color: 'rgba(255,255,255,0.06)' } },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.15)' },
+    timeScale: { borderColor: 'rgba(255,255,255,0.15)', timeVisible: true, secondsVisible: false },
     handleScroll: false,
     handleScale: false,
   });
@@ -138,10 +179,10 @@ function ensureHistogramChart(containerId) {
   const chart = LightweightCharts.createChart(container, {
     width: container.clientWidth,
     height: container.clientHeight || 220,
-    layout: { background: { color: 'transparent' }, textColor: '#64748b', fontSize: 11 },
-    grid: { vertLines: { visible: false }, horzLines: { color: '#1c1c28' } },
-    rightPriceScale: { borderColor: '#2a2a3a' },
-    timeScale: { borderColor: '#2a2a3a', timeVisible: false, secondsVisible: false },
+    layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { visible: false }, horzLines: { color: 'rgba(255,255,255,0.06)' } },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.15)' },
+    timeScale: { borderColor: 'rgba(255,255,255,0.15)', timeVisible: false, secondsVisible: false },
     handleScroll: false,
     handleScale: false,
   });
@@ -163,13 +204,13 @@ function downsample(points, maxPoints) {
 }
 
 function modePillHtml(modo) {
-  return modo === 'live' ? '<span class="pill mode-live">🔴 LIVE</span>' : '<span class="pill mode-paper">○ PAPER</span>';
+  return modo === 'live' ? '<span class="badge rounded-pill text-bg-danger">🔴 LIVE</span>' : '<span class="badge rounded-pill text-bg-secondary">○ PAPER</span>';
 }
 function statusPillHtml(activo) {
-  if (activo === false) return '<span class="pill status-inactive"><span class="dot"></span>PAUSADO</span>';
-  return '<span class="pill status-active"><span class="dot ok"></span>ACTIVE</span>';
+  if (activo === false) return '<span class="badge rounded-pill text-bg-secondary">PAUSADO</span>';
+  return '<span class="badge rounded-pill text-bg-success">ACTIVE</span>';
 }
-// Línea "$X invertido · $Y libre" — reusada en Inicio/Posiciones.
+// Línea "$X invertido · $Y libre" — reusada donde hace falta un resumen corto.
 function investedFreeHtml(capitalInvertido, capitalLibre) {
   if (capitalInvertido === undefined || capitalInvertido === null) return '';
   return `${fmtUsd(capitalInvertido)} invertido · ${fmtUsd(capitalLibre)} libre`;
@@ -199,29 +240,35 @@ function formatTimePeruCompact(iso) {
 // =========================================================================
 function inicioSkeleton() {
   return `
-    <div class="page-header card">
-      <div class="ph-title">CAPITAL TOTAL — BOT 4</div>
-      <div class="ph-value" id="inCapital">—</div>
-      <div class="ph-sub">
-        <span id="inPnlInline">—</span>
-        <span id="inStatusPill"></span>
-        ${modePillHtml('live')}
+    <div class="card mb-3 shadow-sm">
+      <div class="card-body">
+        <div class="text-uppercase text-body-secondary small fw-bold">Capital Total — Bot 4</div>
+        <div class="display-5 fw-bold" id="inCapital">—</div>
+        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+          <span id="inPnlInline">—</span>
+          <span id="inStatusPill"></span>
+          ${modePillHtml('live')}
+        </div>
       </div>
     </div>
-    <div class="stat-row">
-      <div class="stat-box"><div class="stat-label">📈 PnL Total</div><div class="stat-value" id="inPnlTotal">—</div></div>
-      <div class="stat-box"><div class="stat-label">🎯 Win Rate (7d)</div><div class="stat-value" id="inWinRate">—</div></div>
-      <div class="stat-box"><div class="stat-label">🔄 Trades (hoy / 7d)</div><div class="stat-value" id="inTrades">—</div></div>
+    <div class="row row-cols-1 row-cols-md-3 g-2 mb-3">
+      ${statBoxHtml('📈 PnL Total', 'inPnlTotal')}
+      ${statBoxHtml('🎯 Win Rate (7d)', 'inWinRate')}
+      ${statBoxHtml('🔄 Trades (hoy / 7d)', 'inTrades')}
     </div>
-    <div class="chart-card">
-      <div class="chart-card-title">Capital en el tiempo</div>
-      <div class="period-selector" id="inPeriodSelector">
-        <button class="period-btn" data-period="24h">24H</button>
-        <button class="period-btn active" data-period="7d">7D</button>
-        <button class="period-btn" data-period="30d">30D</button>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+          <div class="card-title text-uppercase text-body-secondary small fw-bold mb-0">Capital en el tiempo</div>
+          <div class="btn-group" id="inPeriodSelector">
+            <button class="btn btn-sm btn-outline-secondary period-btn" data-period="24h">24H</button>
+            <button class="btn btn-sm btn-outline-secondary period-btn active" data-period="7d">7D</button>
+            <button class="btn btn-sm btn-outline-secondary period-btn" data-period="30d">30D</button>
+          </div>
+        </div>
+        <div id="inChartPlaceholder" class="text-center text-body-secondary py-5">Cargando gráfica…</div>
+        <div id="inChartContainer" style="height:220px; display:none;"></div>
       </div>
-      <div id="inChartPlaceholder" class="chart-placeholder">Cargando gráfica…</div>
-      <div id="inChartContainer" class="chart-el" style="display:none;"></div>
     </div>
   `;
 }
@@ -277,7 +324,7 @@ async function refreshInicio() {
     $('inPnlInline').innerHTML = `<span class="${pnlClass(pnlUsd)}">${fmtUsd(pnlUsd)} (${fmtPct(pnlPct)})</span>`;
     $('inStatusPill').innerHTML = statusPillHtml(bot.activo);
     $('inPnlTotal').textContent = fmtUsd(pnlUsd);
-    $('inPnlTotal').className = `stat-value ${pnlClass(pnlUsd)}`;
+    $('inPnlTotal').className = `fs-5 fw-bold ${pnlClass(pnlUsd)}`;
     $('inWinRate').textContent = `${bot.winrate7d}%`;
     $('inTrades').textContent = `${bot.tradesHoy} / ${bot.trades7d}`;
   } catch (err) {
@@ -292,10 +339,10 @@ async function refreshInicio() {
 // =========================================================================
 // PAIR_COLORS/PAIR_EMOJI: acento visual por cripto — cualquier par que no
 // esté en el mapa (p.ej. un par nuevo activado con /activar por Telegram)
-// cae al fallback (verde / ●), nunca rompe el render.
+// cae al fallback (verde de Bootstrap / ●), nunca rompe el render.
 const PAIR_COLORS = { BTC: '#f7931a', ETH: '#8a92b2', BNB: '#f0b90b', SOL: '#14f195' };
 const PAIR_EMOJI = { BTC: '₿', ETH: 'Ξ', BNB: '🔶', SOL: '◎' };
-function pairColor(pair) { return PAIR_COLORS[pair.split('/')[0]] || 'var(--green)'; }
+function pairColor(pair) { return PAIR_COLORS[pair.split('/')[0]] || 'var(--bs-success)'; }
 function pairEmoji(pair) { return PAIR_EMOJI[pair.split('/')[0]] || '●'; }
 // pairIconHtml: ícono real de la cripto (cryptocurrency-icons vía jsdelivr,
 // CDN público, sin API key). Si el símbolo no está en ese set (par muy
@@ -313,17 +360,16 @@ function pairIdPrefix(pair) { return `dca-${pair.split('/')[0].toLowerCase()}`; 
 
 // progressRingSvg/updateProgressRing: anillo circular de "compras/maxCompras"
 // — se dibuja una vez con 0% (el skeleton no depende de datos) y cada
-// refresh solo mueve stroke-dashoffset + el texto del centro, mismo criterio
-// "solo tocar lo que cambió" que el resto del dashboard.
+// refresh solo mueve stroke-dashoffset + el texto del centro.
 function progressRingSvg(color, size = 56) {
   const stroke = 5;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   return `
     <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}"/>
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--bs-border-color)" stroke-width="${stroke}"/>
       <circle class="ring-fill" data-circumference="${c.toFixed(2)}" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${c.toFixed(2)}" stroke-linecap="round" transform="rotate(-90 ${size / 2} ${size / 2})"/>
-      <text class="ring-text" x="50%" y="50%" text-anchor="middle" dy="0.35em">0%</text>
+      <text class="ring-text" x="50%" y="50%" text-anchor="middle" dy="0.35em" fill="var(--bs-body-color)">0%</text>
     </svg>`;
 }
 function updateProgressRing(idPrefix, pct) {
@@ -339,17 +385,21 @@ function updateProgressRing(idPrefix, pct) {
 function accumulationPairBlockSkeleton(pair, idPrefix) {
   const color = pairColor(pair);
   return `
-    <div class="pair-card" style="--pair-color:${color}">
-      <div class="pair-card-top">
-        <div class="pair-card-name">${pairIconHtml(pair, 24)} ${esc(pair.split('/')[0])}</div>
-        <div class="pair-card-ring" id="${idPrefix}-ring">${progressRingSvg(color)}</div>
+    <div class="col">
+      <div class="card h-100" style="border-top: 3px solid ${color};">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start mb-1">
+            <div class="fw-bold d-flex align-items-center gap-2">${pairIconHtml(pair, 24)} ${esc(pair.split('/')[0])}</div>
+            <div id="${idPrefix}-ring">${progressRingSvg(color)}</div>
+          </div>
+          <div class="small text-body-secondary mb-2" id="${idPrefix}-ciclo">—</div>
+          ${kv('Avg Entry', `<span id="${idPrefix}-avg-entry">—</span>`)}
+          ${kv('Precio actual', `<span id="${idPrefix}-precio-actual">—</span>`)}
+          ${kv('Invertido', `<span id="${idPrefix}-capital-invertido">—</span>`)}
+          <div id="${idPrefix}-tp-block"></div>
+          <div id="${idPrefix}-trigger-block"></div>
+        </div>
       </div>
-      <div class="stat-sub" id="${idPrefix}-ciclo" style="margin-bottom:10px;">—</div>
-      <div class="kv-row"><span class="label">Avg Entry</span><span class="value" id="${idPrefix}-avg-entry">—</span></div>
-      <div class="kv-row"><span class="label">Precio actual</span><span class="value" id="${idPrefix}-precio-actual">—</span></div>
-      <div class="kv-row"><span class="label">Invertido</span><span class="value" id="${idPrefix}-capital-invertido">—</span></div>
-      <div id="${idPrefix}-tp-block"></div>
-      <div id="${idPrefix}-trigger-block"></div>
     </div>`;
 }
 function updateAccumulationPairBlock(idPrefix, p) {
@@ -363,20 +413,20 @@ function updateAccumulationPairBlock(idPrefix, p) {
   // TP actual del ciclo / precio de venta — solo se muestra si hay compras
   // abiertas (p.tpPct viene null si el par todavía no tiene ningún trade abierto).
   $(`${idPrefix}-tp-block`).innerHTML = p.tpPct !== null ? `
-    <div class="tp-divider"></div>
-    <div class="kv-row"><span class="label">🎯 TP actual</span><span class="value">${p.tpPct}%</span></div>
-    <div class="kv-row"><span class="label">💰 Vende en</span><span class="value">${fmtUsdPrecise(p.precioVenta)}</span></div>
-    <div class="kv-row"><span class="label">📈 Falta subir</span><span class="value pnl-pos">${fmtUsd(p.faltaSubir)} (+${p.faltaPct}%)</span></div>
+    <hr class="my-2">
+    ${kv('🎯 TP actual', `${p.tpPct}%`)}
+    ${kv('💰 Vende en', fmtUsdPrecise(p.precioVenta))}
+    ${kv('📈 Falta subir', `${fmtUsd(p.faltaSubir)} (+${p.faltaPct}%)`, 'text-success')}
   ` : '';
   // triggerNote: server.js solo lo manda cuando el ciclo sigue acumulando
   // pero dynamicDropPctForPair no pudo leer el ATR real (cayó al fallback
   // estático) — en ese caso NO llega nextTriggerPrice, se muestra este aviso
   // en vez del mensaje genérico de "esperando caída".
   $(`${idPrefix}-trigger-block`).innerHTML = p.nextTriggerPrice !== null ? `
-    <div class="tp-divider"></div>
-    <div class="kv-row"><span class="label">Próximo trigger</span><span class="value">${fmtUsdPrecise(p.nextTriggerPrice)}</span></div>
-    <div class="kv-row"><span class="label">Drop necesario</span><span class="value pnl-neg">-${p.dropRequiredPct}%</span></div>
-  ` : `<div class="tp-divider"></div><div class="stat-sub">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`;
+    <hr class="my-2">
+    ${kv('Próximo trigger', fmtUsdPrecise(p.nextTriggerPrice))}
+    ${kv('Drop necesario', `-${p.dropRequiredPct}%`, 'text-danger')}
+  ` : `<hr class="my-2"><div class="small text-body-secondary">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`;
 }
 let poPairKeys = null; // set de pares (string) ya renderizado — null fuerza reconstruir
 function renderAccumulationPathIncremental(pares) {
@@ -407,19 +457,21 @@ function estadoGeneralThoughts(pensamientos) {
   if (pensamientos.some((p) => p.decision === 'comprar')) return { icon: '🟢', label: 'COMPRANDO', sub: 'Encontró una entrada con confianza suficiente.' };
   return { icon: '🟡', label: 'ANALIZANDO', sub: 'Mercado bajo análisis, esperando mejor punto de entrada.' };
 }
-// Umbral ±10%: por encima de +10% es sobrecompra de la semana → naranja/
-// cautela; por debajo de -10% es una caída fuerte → verde, porque para un
-// bot DCA que compra el drop una caída grande es oportunidad, no riesgo (al
-// revés del caso positivo). Entre medio, gris/normal.
+// Umbral ±10%: por encima de +10% es sobrecompra de la semana → cautela;
+// por debajo de -10% es una caída fuerte → verde, porque para un bot DCA que
+// compra el drop una caída grande es oportunidad, no riesgo (al revés del
+// caso positivo). Entre medio, gris/normal.
 function cambio7dInfo(pct) {
-  if (pct === null || pct === undefined) return { texto: 'N/D', color: 'var(--text-sec)', icon: '' };
+  if (pct === null || pct === undefined) return { texto: 'N/D', cls: 'text-body-secondary', icon: '' };
   const texto = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
-  if (pct > 10) return { texto, color: 'var(--yellow)', icon: ' ⚠️' };
-  if (pct < -10) return { texto, color: 'var(--green)', icon: ' 🟢' };
-  return { texto, color: 'var(--text-sec)', icon: '' };
+  if (pct > 10) return { texto, cls: 'text-warning', icon: ' ⚠️' };
+  if (pct < -10) return { texto, cls: 'text-success', icon: ' 🟢' };
+  return { texto, cls: 'text-body-secondary', icon: '' };
 }
 function renderContextoSemanal(contextoSemanal) {
   if (!contextoSemanal) return '';
+  // BNB agregado (2026-08-27, tercer par de Bot 4) — mismo criterio que
+  // btc/ethCambio7d, ver GET /api/bot/4/thoughts en server.js.
   const { btcCambio7d, ethCambio7d, bnbCambio7d } = contextoSemanal;
   const btc = cambio7dInfo(btcCambio7d);
   const eth = cambio7dInfo(ethCambio7d);
@@ -428,15 +480,15 @@ function renderContextoSemanal(contextoSemanal) {
   const sobreextendido = cambios.some((c) => c !== null && c !== undefined && c > 10);
   const conDescuento = !sobreextendido && cambios.some((c) => c !== null && c !== undefined && c < -10);
   const resumen = sobreextendido
-    ? '<div class="stat-sub" style="color:var(--yellow); margin-top:4px;">⚠️ Mercado sobreextendido — bot más cauteloso</div>'
+    ? '<div class="small text-warning mt-1">⚠️ Mercado sobreextendido — bot más cauteloso</div>'
     : conDescuento
-      ? '<div class="stat-sub" style="color:var(--green); margin-top:4px;">🟢 Caída fuerte esta semana — posible oportunidad de compra</div>'
+      ? '<div class="small text-success mt-1">🟢 Caída fuerte esta semana — posible oportunidad de compra</div>'
       : '';
   return `
-    <div class="stat-sub" style="margin-top:10px; border-top:1px solid var(--border); padding-top:8px;">📈 CONTEXTO SEMANAL:</div>
-    <div class="kv-row"><span class="label">BTC</span><span class="value" style="color:${btc.color};">${btc.texto} esta semana${btc.icon}</span></div>
-    <div class="kv-row"><span class="label">ETH</span><span class="value" style="color:${eth.color};">${eth.texto} esta semana${eth.icon}</span></div>
-    <div class="kv-row"><span class="label">BNB</span><span class="value" style="color:${bnb.color};">${bnb.texto} esta semana${bnb.icon}</span></div>
+    <div class="small text-body-secondary mt-2 pt-2 border-top border-secondary-subtle">📈 CONTEXTO SEMANAL:</div>
+    ${kv('BTC', `${btc.texto} esta semana${btc.icon}`, btc.cls)}
+    ${kv('ETH', `${eth.texto} esta semana${eth.icon}`, eth.cls)}
+    ${kv('BNB', `${bnb.texto} esta semana${bnb.icon}`, bnb.cls)}
     ${resumen}`;
 }
 function renderThoughtsPanel(data) {
@@ -444,33 +496,30 @@ function renderThoughtsPanel(data) {
   const masReciente = pensamientos.reduce((max, p) => (!max || new Date(p.timestamp) > new Date(max.timestamp) ? p : max), null);
   const estado = estadoGeneralThoughts(pensamientos);
   const cuerpo = pensamientos.length === 0
-    ? '<div class="empty-state">El bot todavía no registró ninguna decisión.</div>'
+    ? '<div class="small text-body-secondary">El bot todavía no registró ninguna decisión.</div>'
     : pensamientos.map((p) => `
-      <div class="thought-block">
-        <div class="thought-pair">${esc(p.par)}</div>
-        <div class="thought-quote">💭 "${esc(p.razon || p.accion || 'sin detalle')}"</div>
-        <div class="stat-sub">Confianza actual: ${p.confianza}% | Necesita: ${data.confianzaMinima}%</div>
+      <div class="border-bottom border-secondary-subtle pb-2 mb-2">
+        <div class="fw-bold small">${esc(p.par)}</div>
+        <div class="small fst-italic">💭 "${esc(p.razon || p.accion || 'sin detalle')}"</div>
+        <div class="small text-body-secondary">Confianza actual: ${p.confianza}% | Necesita: ${data.confianzaMinima}%</div>
       </div>`).join('');
-  return `
-    <div class="panel" style="border:1px solid #f0b90b55;">
-      <div class="panel-title">🧠 Qué está pensando el bot</div>
-      <div class="stat-sub" style="margin-bottom:10px;">Actualizado ${relativeTimeEs(masReciente && masReciente.timestamp)}</div>
-      ${cuerpo}
-      <div class="kv-row" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px;">
-        <span class="label">Estado general</span>
-        <span class="value">${estado.icon} ${estado.label}</span>
-      </div>
-      <div class="stat-sub">${esc(estado.sub)}</div>
-      ${renderContextoSemanal(data.contextoSemanal)}
-    </div>`;
+  return cardHtml(
+    '🧠 Qué está pensando el bot',
+    `<div class="small text-body-secondary mb-2">Actualizado ${relativeTimeEs(masReciente && masReciente.timestamp)}</div>
+     ${cuerpo}
+     ${kv('Estado general', `${estado.icon} ${estado.label}`)}
+     <div class="small text-body-secondary">${esc(estado.sub)}</div>
+     ${renderContextoSemanal(data.contextoSemanal)}`,
+    'border-warning-subtle',
+  );
 }
 
 // donutChartHtml: distribución del capital por par + libre, con
 // conic-gradient (soportado en todo navegador evergreen, sin librería de
-// gráficos extra para un solo donut). entries: [{ label, value, color }].
+// gráficos extra para un solo donut).
 function donutChartHtml(entries) {
   const total = entries.reduce((s, e) => s + e.value, 0);
-  if (total <= 0) return '<div class="empty-state">Sin capital para distribuir todavía.</div>';
+  if (total <= 0) return '<div class="text-center text-body-secondary py-3">Sin capital para distribuir todavía.</div>';
   let acc = 0;
   const stops = entries.filter((e) => e.value > 0).map((e) => {
     const start = (acc / total) * 360;
@@ -479,40 +528,40 @@ function donutChartHtml(entries) {
     return `${e.color} ${start.toFixed(1)}deg ${end.toFixed(1)}deg`;
   }).join(', ');
   const legend = entries.map((e) => `
-    <div class="donut-legend-row">
+    <div class="d-flex align-items-center gap-2 small mb-1">
       <span class="donut-dot" style="background:${e.color}"></span>
-      <span class="donut-label">${e.icon || ''} ${esc(e.label)}</span>
-      <span class="donut-value">${fmtUsd(e.value)} (${Math.round((e.value / total) * 100)}%)</span>
+      <span class="text-body-secondary flex-grow-1">${esc(e.label)}</span>
+      <span class="fw-bold">${fmtUsd(e.value)} (${Math.round((e.value / total) * 100)}%)</span>
     </div>`).join('');
   return `
-    <div class="donut-wrap">
+    <div class="d-flex align-items-center gap-4 flex-wrap">
       <div class="donut-chart" style="background: conic-gradient(${stops});"></div>
-      <div class="donut-legend">${legend}</div>
+      <div class="flex-grow-1" style="min-width:160px;">${legend}</div>
     </div>`;
 }
 
 function posicionesSkeleton() {
   return `
-    <div class="page-header">
-      <div class="ph-title">POSICIONES — BOT 4</div>
+    <h4 class="mb-3">💰 Posiciones — Bot 4</h4>
+    <div class="row row-cols-1 row-cols-md-3 g-2 mb-3">
+      ${statBoxHtml('💰 Capital Total', 'poCapitalTotal')}
+      ${statBoxHtml('📥 Invertido', 'poInvertido')}
+      ${statBoxHtml('📤 Libre', 'poLibre')}
     </div>
-    <div class="stat-row">
-      <div class="stat-box"><div class="stat-label">💰 Capital Total</div><div class="stat-value" id="poCapitalTotal">—</div></div>
-      <div class="stat-box"><div class="stat-label">📥 Invertido</div><div class="stat-value" id="poInvertido">—</div></div>
-      <div class="stat-box"><div class="stat-label">📤 Libre</div><div class="stat-value" id="poLibre">—</div></div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">🥧 Distribución del capital</div>
-      <div id="poDonutPanel"><div class="empty-state skeleton">Cargando…</div></div>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="card-title text-uppercase text-body-secondary small fw-bold mb-2">🥧 Distribución del capital</div>
+        <div id="poDonutPanel" class="text-center text-body-secondary py-3">Cargando…</div>
+      </div>
     </div>
     <div id="poErrorBanner"></div>
     <div id="poRealBalancePanel"></div>
     <div id="poThoughtsPanel"></div>
-    <div class="section-title">Accumulation Path</div>
-    <div class="pair-grid" id="poPairBlocks"><div class="empty-state skeleton">Cargando…</div></div>
-    <div class="section-title">Configuración de la estrategia</div>
-    <div class="stat-row" id="poConfigStats"><div class="empty-state skeleton">Cargando…</div></div>
-    <div class="stat-sub" id="poDropLabel" style="margin-top:10px;"></div>
+    <h6 class="text-uppercase text-body-secondary fw-bold mt-4 mb-2">Accumulation Path</h6>
+    <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3 mb-2" id="poPairBlocks"><div class="col"><div class="text-center text-body-secondary py-3">Cargando…</div></div></div>
+    <h6 class="text-uppercase text-body-secondary fw-bold mt-4 mb-2">Configuración de la estrategia</h6>
+    <div class="row row-cols-1 row-cols-md-3 g-2 mb-1" id="poConfigStats"></div>
+    <div class="small text-body-secondary" id="poDropLabel"></div>
   `;
 }
 function renderPosicionesSkeleton() {
@@ -535,7 +584,7 @@ async function refreshPosiciones() {
 
     const donutEntries = [
       ...Object.entries(path.pares).map(([pair, p]) => ({ label: pair.split('/')[0], value: p.totalInvested, color: pairColor(pair) })),
-      { label: 'Libre', value: bot.capitalLibre, color: 'var(--text-sec)' },
+      { label: 'Libre', value: bot.capitalLibre, color: 'var(--bs-secondary-color)' },
     ];
     $('poDonutPanel').innerHTML = donutChartHtml(donutEntries);
 
@@ -545,39 +594,41 @@ async function refreshPosiciones() {
     // fetchBot4BalanceReal en server.js). Ahora itera real.posiciones tal
     // cual venga, sin asumir cuáles/cuántos pares hay.
     const posicionesHtml = (real && real.live)
-      ? Object.entries(real.posiciones).map(([sym, p]) => `<div class="kv-row"><span class="label" style="display:flex;align-items:center;gap:6px;">${pairIconHtml(`${sym}/USDT`, 16)} ${esc(sym)}</span><span class="value">${p.cantidad.toFixed(6)} (${fmtUsd(p.valorUsd)})</span></div>`).join('')
+      ? Object.entries(real.posiciones).map(([sym, p]) => kv(`${pairIconHtml(`${sym}/USDT`, 16)} ${esc(sym)}`, `${p.cantidad.toFixed(6)} (${fmtUsd(p.valorUsd)})`)).join('')
       : '';
-    $('poRealBalancePanel').innerHTML = (real && real.live) ? `
-      <div class="panel" style="border:1px solid #ff3b3b55;">
-        <div class="panel-title">💰 Saldo real en Binance <span class="pill mode-live">🔴 LIVE</span></div>
-        <div class="kv-row"><span class="label">USDT disponible</span><span class="value">${fmtUsd(real.usdtDisponible)}</span></div>
-        ${posicionesHtml}
-        <div class="kv-row"><span class="label">Capital total real</span><span class="value">${fmtUsd(real.capitalRealTotal)}</span></div>
-      </div>` : '';
+    $('poRealBalancePanel').innerHTML = (real && real.live) ? cardHtml(
+      `💰 Saldo real en Binance ${modePillHtml('live')}`,
+      kv('USDT disponible', fmtUsd(real.usdtDisponible)) + posicionesHtml + kv('Capital total real', fmtUsd(real.capitalRealTotal)),
+      'border-danger-subtle',
+    ) : '';
 
     $('poThoughtsPanel').innerHTML = thoughts ? renderThoughtsPanel(thoughts) : '';
 
     renderAccumulationPathIncremental(path.pares);
 
-    $('poConfigStats').innerHTML = `
-      <div class="stat-box"><div class="stat-label">Orden por compra</div><div class="stat-value">${path.config.baseOrderUsd !== null ? fmtUsd(path.config.baseOrderUsd) : 'variable'}</div></div>
-      <div class="stat-box"><div class="stat-label">Take Profit</div><div class="stat-value">${path.config.tpMinPct}% – ${path.config.tpMaxPct}%</div></div>
-      <div class="stat-box"><div class="stat-label">Máx. compras</div><div class="stat-value">${path.config.maxCompras}</div></div>`;
+    $('poConfigStats').innerHTML = [
+      statBoxValueHtml('Orden por compra', path.config.baseOrderUsd !== null ? fmtUsd(path.config.baseOrderUsd) : 'variable'),
+      statBoxValueHtml('Take Profit', `${path.config.tpMinPct}% – ${path.config.tpMaxPct}%`),
+      statBoxValueHtml('Máx. compras', path.config.maxCompras),
+    ].join('');
     $('poDropLabel').textContent = `Drop trigger: ${path.config.dropPctLabel}`;
     $('poErrorBanner').innerHTML = '';
   } catch (err) {
-    $('poErrorBanner').innerHTML = '<div class="empty-state">No se pudo cargar la información de posiciones.</div>';
+    $('poErrorBanner').innerHTML = '<div class="alert alert-secondary">No se pudo cargar la información de posiciones.</div>';
   }
 }
 
 // =========================================================================
 // PÁGINA: HISTORIAL — un ciclo = todas las compras DCA de un par que se
 // cerraron JUNTAS en la misma venta (ver sellAll en competitionDcaMotorA.js)
-// — tarjeta expandible con el resumen del ciclo y el detalle de cada compra.
+// — acordeón de Bootstrap con el resumen del ciclo y el detalle de cada compra.
 // =========================================================================
 function cycleKey(c) { return `${c.par}|${c.cierreTs}`; }
+// cycleDomId: id de DOM válido para el accordion (data-bs-target) a partir
+// de la misma clave única que ya usaba el render incremental.
+function cycleDomId(c) { return `cyc-${cycleKey(c).replace(/[^a-zA-Z0-9_-]/g, '-')}`; }
 function cycleCardHtml(c, extraClass = '') {
-  const cardClass = ['cycle-card', extraClass].filter(Boolean).join(' ');
+  const domId = cycleDomId(c);
   const comprasHtml = c.compras.map((b) => `
     <tr>
       <td>${fmtUsdPrecise(b.precio, b.precio < 10 ? 4 : 2)}</td>
@@ -585,27 +636,32 @@ function cycleCardHtml(c, extraClass = '') {
       <td class="${pnlClass(b.pnl)}">${fmtUsd(b.pnl)}</td>
     </tr>`).join('');
   return `
-    <details class="${cardClass}" style="--pair-color:${pairColor(c.par)}">
-      <summary>
-        <div class="cycle-summary-row">
-          <div class="cycle-summary-main">
-            <span class="cycle-pair">${pairIconHtml(c.par, 18)} ${esc(c.par)}</span>
-            <span class="cycle-time-row">Inicio: ${formatTimePeruCompact(c.inicioTs)}</span>
-            <span class="cycle-time-row">Fin: ${formatTimePeruCompact(c.cierreTs)}</span>
-            <span class="cycle-meta">(${esc(c.duracion)}) · ${c.numCompras} compras · ${fmtUsd(c.totalInvertido)} invertido</span>
+    <div class="accordion-item ${extraClass}" style="border-left: 3px solid ${pairColor(c.par)};">
+      <h2 class="accordion-header">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#${domId}" aria-expanded="false" aria-controls="${domId}">
+          <div class="d-flex justify-content-between align-items-center w-100 me-2 flex-wrap gap-2">
+            <div>
+              <div class="fw-bold">${pairIconHtml(c.par, 18)} ${esc(c.par)}</div>
+              <div class="small text-body-secondary">Inicio: ${formatTimePeruCompact(c.inicioTs)} · Fin: ${formatTimePeruCompact(c.cierreTs)}</div>
+              <div class="small text-body-secondary">(${esc(c.duracion)}) · ${c.numCompras} compras · ${fmtUsd(c.totalInvertido)} invertido</div>
+            </div>
+            <div class="fw-bold ${pnlClass(c.pnlTotal)}">${c.outcome === 'win' ? '✅' : '❌'} ${fmtUsd(c.pnlTotal)}</div>
           </div>
-          <span class="cycle-outcome ${pnlClass(c.pnlTotal)}">${c.outcome === 'win' ? '✅' : '❌'} ${fmtUsd(c.pnlTotal)}<span class="cycle-chevron"> ▶</span></span>
+        </button>
+      </h2>
+      <div id="${domId}" class="accordion-collapse collapse">
+        <div class="accordion-body">
+          ${kv('Precio promedio', fmtUsdPrecise(c.precioPromedio, c.precioPromedio < 10 ? 4 : 2))}
+          ${kv('Precio de salida', fmtUsdPrecise(c.precioSalida, c.precioSalida < 10 ? 4 : 2))}
+          <div class="table-responsive mt-2">
+            <table class="table table-sm mb-0">
+              <thead><tr><th>Precio</th><th>Monto</th><th>PnL</th></tr></thead>
+              <tbody>${comprasHtml}</tbody>
+            </table>
+          </div>
         </div>
-      </summary>
-      <div class="cycle-body">
-        <div class="kv-row"><span class="label">Precio promedio</span><span class="value">${fmtUsdPrecise(c.precioPromedio, c.precioPromedio < 10 ? 4 : 2)}</span></div>
-        <div class="kv-row"><span class="label">Precio de salida</span><span class="value">${fmtUsdPrecise(c.precioSalida, c.precioSalida < 10 ? 4 : 2)}</span></div>
-        <table class="data-table cycle-buys-table">
-          <thead><tr><th>Precio</th><th>Monto</th><th>PnL</th></tr></thead>
-          <tbody>${comprasHtml}</tbody>
-        </table>
       </div>
-    </details>`;
+    </div>`;
 }
 let dcaKnownCycleKeys = null; // Set<string> de ciclos ya en la lista — null fuerza reconstruir
 function renderDcaCyclesIncremental(ciclos) {
@@ -615,8 +671,8 @@ function renderDcaCyclesIncremental(ciclos) {
     // sin animación de "nuevo".
     dcaKnownCycleKeys = new Set(ciclos.map(cycleKey));
     $('dcaHistory').innerHTML = ciclos.length === 0
-      ? '<div class="empty-state">Sin ciclos cerrados todavía.</div>'
-      : `<div id="dcaCyclesList">${ciclos.map((c) => cycleCardHtml(c)).join('')}</div>`;
+      ? '<div class="text-center text-body-secondary py-4">Sin ciclos cerrados todavía.</div>'
+      : `<div class="accordion accordion-flush" id="dcaCyclesList">${ciclos.map((c) => cycleCardHtml(c)).join('')}</div>`;
     return;
   }
   // ciclos viene ordenado más nuevo primero — se recorre desde el principio
@@ -630,22 +686,20 @@ function renderDcaCyclesIncremental(ciclos) {
   }
   if (nuevos.length === 0) return;
   for (let i = nuevos.length - 1; i >= 0; i--) {
-    list.insertAdjacentHTML('afterbegin', cycleCardHtml(nuevos[i], 'row-new'));
+    list.insertAdjacentHTML('afterbegin', cycleCardHtml(nuevos[i], 'cycle-new'));
   }
 }
 function historialSkeleton() {
   return `
-    <div class="page-header">
-      <div class="ph-title">HISTORIAL DE CICLOS — BOT 4</div>
-      <div class="stat-sub" style="margin-top:6px;">Cada tarjeta es un ciclo completo: todas las compras DCA de un par, cerradas juntas en la misma venta.</div>
-    </div>
-    <div class="stat-row">
-      <div class="stat-box"><div class="stat-label">📜 Ciclos cerrados</div><div class="stat-value" id="hiTotalCiclos">—</div></div>
-      <div class="stat-box"><div class="stat-label">🎯 Win Rate</div><div class="stat-value" id="hiWinRate">—</div></div>
-      <div class="stat-box"><div class="stat-label">📈 PnL total</div><div class="stat-value" id="hiPnlTotal">—</div></div>
+    <h4 class="mb-1">📜 Historial de Ciclos — Bot 4</h4>
+    <div class="small text-body-secondary mb-3">Cada tarjeta es un ciclo completo: todas las compras DCA de un par, cerradas juntas en la misma venta.</div>
+    <div class="row row-cols-1 row-cols-md-3 g-2 mb-3">
+      ${statBoxHtml('📜 Ciclos cerrados', 'hiTotalCiclos')}
+      ${statBoxHtml('🎯 Win Rate', 'hiWinRate')}
+      ${statBoxHtml('📈 PnL total', 'hiPnlTotal')}
     </div>
     <div id="hiErrorBanner"></div>
-    <div class="table-wrap" id="dcaHistory"><div class="empty-state skeleton">Cargando…</div></div>
+    <div id="dcaHistory"><div class="text-center text-body-secondary py-4">Cargando…</div></div>
   `;
 }
 function renderHistorialSkeleton() {
@@ -660,7 +714,7 @@ function renderHistorialSummary(cycles) {
   $('hiTotalCiclos').textContent = total;
   $('hiWinRate').textContent = `${winRate}%`;
   $('hiPnlTotal').textContent = fmtUsd(pnlTotal);
-  $('hiPnlTotal').className = `stat-value ${pnlClass(pnlTotal)}`;
+  $('hiPnlTotal').className = `fs-5 fw-bold ${pnlClass(pnlTotal)}`;
 }
 async function refreshHistorial() {
   try {
@@ -669,7 +723,7 @@ async function refreshHistorial() {
     renderDcaCyclesIncremental(cycles || []);
     $('hiErrorBanner').innerHTML = '';
   } catch (err) {
-    $('hiErrorBanner').innerHTML = '<div class="empty-state">No se pudo cargar el historial.</div>';
+    $('hiErrorBanner').innerHTML = '<div class="alert alert-secondary">No se pudo cargar el historial.</div>';
   }
 }
 
@@ -703,48 +757,46 @@ let metCyclesCache = []; // /api/bot/4/cycles, para el detalle "trades de ese d�
 
 function metricasSkeleton() {
   return `
-    <div class="page-header">
-      <div class="ph-title">📈 MÉTRICAS — BOT 4</div>
-      <div class="ph-sub" style="font-size:13px; font-weight:400; color:var(--text-sec);">Solo ganancias REALES de trades cerrados (no incluye capital agregado a mano)</div>
-    </div>
+    <h4 class="mb-1">📈 Métricas — Bot 4</h4>
+    <div class="small text-body-secondary mb-3">Solo ganancias REALES de trades cerrados (no incluye capital agregado a mano)</div>
 
-    <div class="chart-card">
-      <div class="chart-card-title" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>📅 Calendario de ganancias</span>
-        <span style="display:flex; align-items:center; gap:10px;">
-          <button class="period-btn" id="metCalPrev">‹</button>
-          <span id="metCalLabel" style="min-width:130px; text-align:center; display:inline-block; font-weight:700; color:var(--text);">—</span>
-          <button class="period-btn" id="metCalNext">›</button>
-        </span>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+          <div class="card-title mb-0">📅 Calendario de ganancias</div>
+          <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-sm btn-outline-secondary" id="metCalPrev">‹</button>
+            <span id="metCalLabel" class="fw-bold" style="min-width:130px; text-align:center; display:inline-block;">—</span>
+            <button class="btn btn-sm btn-outline-secondary" id="metCalNext">›</button>
+          </div>
+        </div>
+        <div class="metrics-calendar-weekdays">${MET_DIAS_SEMANA.map((d) => `<div class="mc-weekday">${d}</div>`).join('')}</div>
+        <div class="metrics-calendar" id="metCalendarGrid"><div class="text-center text-body-secondary py-3">Cargando…</div></div>
       </div>
-      <div class="metrics-calendar-weekdays">${MET_DIAS_SEMANA.map((d) => `<div class="mc-weekday">${d}</div>`).join('')}</div>
-      <div class="metrics-calendar" id="metCalendarGrid"><div class="empty-state skeleton">Cargando…</div></div>
     </div>
 
-    <div class="panel" id="metDayDetailPanel" style="display:none;">
-      <div class="panel-title" id="metDayDetailTitle">Trades del día</div>
-      <div id="metDayDetailBody"></div>
-    </div>
-
-    <div class="chart-card">
-      <div class="chart-card-title">📊 Ganancias netas por día (USD)</div>
-      <div class="chart-el" id="metBarChartContainer"></div>
-      <div class="chart-placeholder" id="metBarChartPlaceholder" style="display:none;">Sin trades cerrados todavía.</div>
-    </div>
-
-    <div class="section-title">Resumen del mes</div>
-    <div class="stat-row" id="metSummaryRow"><div class="empty-state skeleton">Cargando…</div></div>
-
-    <div class="section-title">🏆 Top trades del mes</div>
-    <div class="metrics-top-grid">
-      <div class="panel">
-        <div class="panel-title">Mejores 5</div>
-        <div id="metTopBest"><div class="empty-state skeleton">Cargando…</div></div>
+    <div class="card mb-3" id="metDayDetailPanel" style="display:none;">
+      <div class="card-body">
+        <div class="card-title" id="metDayDetailTitle">Trades del día</div>
+        <div id="metDayDetailBody"></div>
       </div>
-      <div class="panel">
-        <div class="panel-title">Peores 5</div>
-        <div id="metTopWorst"><div class="empty-state skeleton">Cargando…</div></div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="card-title mb-2">📊 Ganancias netas por día (USD)</div>
+        <div id="metBarChartContainer" style="height:220px;"></div>
+        <div class="text-center text-body-secondary py-5" id="metBarChartPlaceholder" style="display:none;">Sin trades cerrados todavía.</div>
       </div>
+    </div>
+
+    <h6 class="text-uppercase text-body-secondary fw-bold mt-4 mb-2">Resumen del mes</h6>
+    <div class="row row-cols-2 row-cols-md-3 g-2 mb-3" id="metSummaryRow"><div class="col"><div class="text-center text-body-secondary py-3">Cargando…</div></div></div>
+
+    <h6 class="text-uppercase text-body-secondary fw-bold mt-4 mb-2">🏆 Top trades del mes</h6>
+    <div class="row row-cols-1 row-cols-md-2 g-3">
+      <div class="col"><div class="card h-100"><div class="card-body"><div class="card-title">Mejores 5</div><div id="metTopBest"><div class="small text-body-secondary">Cargando…</div></div></div></div></div>
+      <div class="col"><div class="card h-100"><div class="card-body"><div class="card-title">Peores 5</div><div id="metTopWorst"><div class="small text-body-secondary">Cargando…</div></div></div></div></div>
     </div>
   `;
 }
@@ -788,12 +840,8 @@ function renderMetDayDetail() {
 
   const ciclosDelDia = metCyclesCache.filter((c) => peruDateKey(c.cierreTs) === metSelectedFecha);
   $('metDayDetailBody').innerHTML = ciclosDelDia.length === 0
-    ? '<div class="empty-state">Sin ciclos cerrados ese día.</div>'
-    : ciclosDelDia.map((c) => `
-      <div class="kv-row">
-        <span class="label">${esc(c.par)} · ${c.numCompras} compras · ${formatTimePeruCompact(c.cierreTs)}</span>
-        <span class="value ${pnlClass(c.pnlTotal)}">${fmtUsd(c.pnlTotal)}</span>
-      </div>`).join('');
+    ? '<div class="small text-body-secondary">Sin ciclos cerrados ese día.</div>'
+    : ciclosDelDia.map((c) => kv(`${esc(c.par)} · ${c.numCompras} compras · ${formatTimePeruCompact(c.cierreTs)}`, fmtUsd(c.pnlTotal), pnlClass(c.pnlTotal))).join('');
 }
 
 function loadMetBarChart(dailyData) {
@@ -817,28 +865,24 @@ function loadMetBarChart(dailyData) {
 }
 
 function renderMetSummary(m) {
-  if (!m) { $('metSummaryRow').innerHTML = '<div class="empty-state">No se pudo cargar.</div>'; return; }
-  $('metSummaryRow').innerHTML = `
-    <div class="stat-box"><div class="stat-label">Días operando</div><div class="stat-value">${m.diasOperando}</div></div>
-    <div class="stat-box"><div class="stat-label">Trades cerrados</div><div class="stat-value">${m.tradesCerrados}</div></div>
-    <div class="stat-box"><div class="stat-label">Ganancia bruta</div><div class="stat-value ${pnlClass(m.pnlBruto)}">${fmtUsd(m.pnlBruto)}</div></div>
-    <div class="stat-box"><div class="stat-label">Fees pagados</div><div class="stat-value pnl-neg">-${fmtUsd(Math.abs(m.feesTotal))}</div></div>
-    <div class="stat-box"><div class="stat-label">Ganancia NETA</div><div class="stat-value ${pnlClass(m.pnlNeto)}">${fmtUsd(m.pnlNeto)} ${m.pnlNeto >= 0 ? '✅' : ''}</div></div>
-    <div class="stat-box"><div class="stat-label">Mejor día</div><div class="stat-value pnl-pos">${m.mejorDia ? `${m.mejorDia.fecha}` : '—'}</div><div class="stat-sub">${m.mejorDia ? fmtUsd(m.mejorDia.pnl) : ''}</div></div>
-    <div class="stat-box"><div class="stat-label">Peor día</div><div class="stat-value pnl-neg">${m.peorDia ? `${m.peorDia.fecha}` : '—'}</div><div class="stat-sub">${m.peorDia ? fmtUsd(m.peorDia.pnl) : ''}</div></div>
-    <div class="stat-box"><div class="stat-label">Win Rate del mes</div><div class="stat-value">${m.winRate}%</div></div>
-    <div class="stat-box"><div class="stat-label">Profit Factor</div><div class="stat-value">${m.profitFactor !== null ? m.profitFactor.toFixed(2) : '∞'}</div></div>
-  `;
+  if (!m) { $('metSummaryRow').innerHTML = '<div class="col"><div class="small text-body-secondary">No se pudo cargar.</div></div>'; return; }
+  $('metSummaryRow').innerHTML = [
+    statBoxValueHtml('Días operando', m.diasOperando),
+    statBoxValueHtml('Trades cerrados', m.tradesCerrados),
+    statBoxValueHtml('Ganancia bruta', `<span class="${pnlClass(m.pnlBruto)}">${fmtUsd(m.pnlBruto)}</span>`),
+    statBoxValueHtml('Fees pagados', `<span class="text-danger">-${fmtUsd(Math.abs(m.feesTotal))}</span>`),
+    statBoxValueHtml('Ganancia NETA', `<span class="${pnlClass(m.pnlNeto)}">${fmtUsd(m.pnlNeto)} ${m.pnlNeto >= 0 ? '✅' : ''}</span>`),
+    statBoxValueHtml('Mejor día', `<span class="text-success">${m.mejorDia ? m.mejorDia.fecha : '—'}</span><div class="small text-body-secondary">${m.mejorDia ? fmtUsd(m.mejorDia.pnl) : ''}</div>`),
+    statBoxValueHtml('Peor día', `<span class="text-danger">${m.peorDia ? m.peorDia.fecha : '—'}</span><div class="small text-body-secondary">${m.peorDia ? fmtUsd(m.peorDia.pnl) : ''}</div>`),
+    statBoxValueHtml('Win Rate del mes', `${m.winRate}%`),
+    statBoxValueHtml('Profit Factor', m.profitFactor !== null ? m.profitFactor.toFixed(2) : '∞'),
+  ].join('');
 }
 
 function renderMetTopTrades(top) {
   const renderList = (list) => (!list || list.length === 0
-    ? '<div class="empty-state">Sin trades este mes.</div>'
-    : list.map((t) => `
-      <div class="kv-row">
-        <span class="label">${esc(t.pair.split('/')[0])} ${esc(t.horaPeru)}</span>
-        <span class="value ${pnlClass(t.pnl)}">${fmtUsd(t.pnl)}</span>
-      </div>`).join(''));
+    ? '<div class="small text-body-secondary">Sin trades este mes.</div>'
+    : list.map((t) => kv(`${esc(t.pair.split('/')[0])} ${esc(t.horaPeru)}`, fmtUsd(t.pnl), pnlClass(t.pnl))).join(''));
   $('metTopBest').innerHTML = renderList(top && top.mejores);
   $('metTopWorst').innerHTML = renderList(top && top.peores);
 }
@@ -880,7 +924,7 @@ async function refreshMetricas() {
     renderMetSummary(monthly);
     renderMetTopTrades(top);
   } catch (err) {
-    $('metSummaryRow').innerHTML = '<div class="empty-state">No se pudo cargar la información de métricas.</div>';
+    $('metSummaryRow').innerHTML = '<div class="col"><div class="small text-body-secondary">No se pudo cargar la información de métricas.</div></div>';
   }
 }
 
@@ -889,32 +933,37 @@ async function refreshMetricas() {
 // =========================================================================
 function settingsSkeleton() {
   return `
-    <div class="page-header">
-      <div class="ph-title">Settings</div>
-      <div class="ph-value" style="font-size:22px;">Configuración del dashboard</div>
-    </div>
-    <div class="panel">
-      <div class="panel-title">Estado del bot</div>
-      <div id="setStatus"><div class="empty-state skeleton">Cargando…</div></div>
-    </div>
-    <div class="panel">
-      <div class="settings-field">
-        <label>API base (Cloudflare Tunnel)</label>
-        <input type="text" id="apiBaseInput" value="${esc(API_BASE)}">
+    <h4 class="mb-3">⚙️ Settings</h4>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="card-title">Estado del bot</div>
+        <div id="setStatus"><div class="small text-body-secondary">Cargando…</div></div>
       </div>
-      <button class="btn" id="apiBaseSave">Guardar y recargar</button>
-      <div class="stat-sub" style="margin-top:10px;">También podés pasar <code>?api=https://tu-url</code> en la URL — se guarda solo para este navegador.</div>
     </div>
-    <div class="panel">
-      <div class="panel-title">📝 Borradores Binance Square</div>
-      <div class="stat-sub" style="margin-bottom:10px;">Generados solos cuando Bot 4 cierra un trade real ganador (+$0.50). No se publican solos — copiá el texto y publicalo vos desde tu cuenta.</div>
-      <div id="squarePostsList"><div class="empty-state skeleton">Cargando…</div></div>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label small text-uppercase fw-bold text-body-secondary">API base (Cloudflare Tunnel)</label>
+          <input type="text" class="form-control" id="apiBaseInput" value="${esc(API_BASE)}">
+        </div>
+        <button class="btn btn-primary" id="apiBaseSave">Guardar y recargar</button>
+        <div class="form-text mt-2">También podés pasar <code>?api=https://tu-url</code> en la URL — se guarda solo para este navegador.</div>
+      </div>
     </div>
-    <div class="panel">
-      <div class="panel-title">Acerca de</div>
-      <div class="kv-row"><span class="label">Dashboard</span><span class="value">Nuvera Bot — Bot 4</span></div>
-      <div class="kv-row"><span class="label">Repositorio bot</span><span class="value"><a href="https://github.com/alexys1/nuvera-trading-bot" target="_blank" rel="noopener">nuvera-trading-bot</a></span></div>
-      <div class="kv-row"><span class="label">Repositorio dashboard</span><span class="value"><a href="https://github.com/alexys1/nuvera-dashboard" target="_blank" rel="noopener">nuvera-dashboard</a></span></div>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="card-title">📝 Borradores Binance Square</div>
+        <div class="small text-body-secondary mb-2">Generados solos cuando Bot 4 cierra un trade real ganador (+$0.50). No se publican solos — copiá el texto y publicalo vos desde tu cuenta.</div>
+        <div id="squarePostsList"><div class="small text-body-secondary">Cargando…</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title">Acerca de</div>
+        ${kv('Dashboard', 'Nuvera Bot — Bot 4')}
+        ${kv('Repositorio bot', '<a href="https://github.com/alexys1/nuvera-trading-bot" target="_blank" rel="noopener">nuvera-trading-bot</a>')}
+        ${kv('Repositorio dashboard', '<a href="https://github.com/alexys1/nuvera-dashboard" target="_blank" rel="noopener">nuvera-dashboard</a>')}
+      </div>
     </div>
   `;
 }
@@ -936,24 +985,24 @@ function renderSettingsSkeleton() {
 async function refreshSettings() {
   try {
     const data = await fetchJson('/api/overview');
-    $('setStatus').innerHTML = `
-      <div class="kv-row"><span class="label">Estado</span><span class="value">${data.estado === 'operando' ? '✅ Operando' : '⏸️ Pausado'}</span></div>
-      <div class="kv-row"><span class="label">Modo</span><span class="value">${data.modo === 'live' ? '🔴 LIVE' : '📄 PAPER'}</span></div>
-      <div class="kv-row"><span class="label">Capital total</span><span class="value">${fmtUsd(data.capitalTotal)}</span></div>`;
+    $('setStatus').innerHTML =
+      kv('Estado', data.estado === 'operando' ? '✅ Operando' : '⏸️ Pausado')
+      + kv('Modo', data.modo === 'live' ? '🔴 LIVE' : '📄 PAPER')
+      + kv('Capital total', fmtUsd(data.capitalTotal));
   } catch (err) {
-    $('setStatus').innerHTML = '<div class="empty-state">No se pudo conectar a la API.</div>';
+    $('setStatus').innerHTML = '<div class="alert alert-secondary">No se pudo conectar a la API.</div>';
   }
   try {
     const posts = await fetchJson('/api/square-posts?limit=10');
     $('squarePostsList').innerHTML = posts.length === 0
-      ? '<div class="empty-state">Todavía no hay borradores.</div>'
+      ? '<div class="small text-body-secondary">Todavía no hay borradores.</div>'
       : posts.map((p) => `
-        <div class="kv-row" style="align-items:flex-start; flex-direction:column; gap:4px; padding:10px 0;">
-          <div>${esc(p.contenido)}</div>
-          <div class="stat-sub">${new Date(p.createdAt).toLocaleString()} ${p.publicado ? '· ya marcado como publicado' : ''}</div>
+        <div class="border-bottom border-secondary-subtle py-2">
+          <div class="small">${esc(p.contenido)}</div>
+          <div class="text-body-secondary" style="font-size:11px;">${new Date(p.createdAt).toLocaleString()} ${p.publicado ? '· ya marcado como publicado' : ''}</div>
         </div>`).join('');
   } catch (err) {
-    $('squarePostsList').innerHTML = '<div class="empty-state">No se pudieron cargar los borradores.</div>';
+    $('squarePostsList').innerHTML = '<div class="small text-body-secondary">No se pudieron cargar los borradores.</div>';
   }
 }
 
@@ -1000,9 +1049,9 @@ function applyRoute() {
   const raw = window.location.hash.replace('#', '');
   const route = ROUTES.includes(raw) ? raw : 'inicio';
   currentRoute = route;
-  document.querySelectorAll('.nav-item[data-route]').forEach((btn) => btn.classList.toggle('active', btn.dataset.route === route));
+  document.querySelectorAll('.nav-link[data-route]').forEach((btn) => btn.classList.toggle('active', btn.dataset.route === route));
   clearAllCharts();
-  closeSidebar();
+  closeMobileSidebar();
   (ROUTE_RENDER[route] || renderInicioSkeleton)();
   (ROUTE_REFRESH[route] || refreshInicio)();
   startPolling();

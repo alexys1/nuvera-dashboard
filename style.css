@@ -1,11 +1,46 @@
-/* Nuvera Bot — Dashboard de Bot 4 (2026-09-16, 4to rediseño: migración a
-   Bootstrap 5, ver index.html/app.js). Bootstrap (vía CDN, data-bs-theme=
-   "dark") resuelve layout/cards/badges/accordion/grid — acá solo quedan las
-   piezas que Bootstrap no tiene: colores por cripto, anillo de progreso SVG,
-   donut de distribución de capital, calendario de Métricas, y el pulso del
-   indicador LIVE. Todo lo demás usa clases de Bootstrap directo en app.js. */
+/* Nuvera Bot — Dashboard de Bot 4 (2026-09-16, 5to rediseño: tema propio
+   "Binance-like" sobre Bootstrap 5, ver index.html/app.js). Bootstrap (vía
+   CDN) resuelve layout/cards/badges/accordion/grid — el gris del tema
+   data-bs-theme="dark" por defecto no convenció ("todo feo con este color"),
+   así que acá se pisan las custom properties de Bootstrap con una paleta
+   propia (negro + dorado, como la app real de Binance) en vez de tocar el
+   markup — Bootstrap sigue siendo la base, solo cambia la piel. Fuera de
+   estas variables, acá solo quedan las piezas que Bootstrap no tiene:
+   colores por cripto, anillo de progreso SVG, donut de distribución de
+   capital, calendario de Métricas (estilo mapa de calor), pulso LIVE. */
 
-body { overflow-x: hidden; }
+:root,
+[data-bs-theme="dark"] {
+  --bs-body-bg: #0a0a0f;
+  --bs-body-color: #e2e8f0;
+  --bs-emphasis-color: #ffffff;
+  --bs-secondary-color: #94a3b8;
+  --bs-tertiary-bg: #111118;
+  --bs-secondary-bg: #16161f;
+  --bs-border-color: #2a2a3a;
+  --bs-border-color-translucent: #2a2a3a;
+  --bs-primary: #f0b90b;
+  --bs-primary-rgb: 240, 185, 11;
+  --bs-link-color: #f0b90b;
+  --bs-link-color-rgb: 240, 185, 11;
+  --bs-link-hover-color: #ffd23f;
+}
+body { overflow-x: hidden; background: var(--bs-body-bg); }
+
+/* Componentes con variables propias que no heredan de los tokens de arriba
+   (ver docs de Bootstrap: .card/.offcanvas/.accordion definen su propio
+   fondo/borde local, con fallback a los tokens globales SOLO si no se
+   pisan acá). */
+.card { --bs-card-bg: #16161f; --bs-card-border-color: #2a2a3a; }
+.offcanvas { --bs-offcanvas-bg: #111118; --bs-offcanvas-border-color: #2a2a3a; --bs-offcanvas-color: var(--bs-body-color); }
+.accordion { --bs-accordion-bg: #16161f; --bs-accordion-border-color: #2a2a3a; --bs-accordion-active-bg: #1c1c28; --bs-accordion-active-color: #f0b90b; --bs-accordion-btn-color: var(--bs-body-color); }
+.nav-pills { --bs-nav-pills-link-active-bg: #f0b90b; }
+.nav-pills .nav-link.active { color: #0a0a0f; font-weight: 700; }
+.nav-pills .nav-link { color: var(--bs-secondary-color); }
+.nav-pills .nav-link:hover { color: var(--bs-body-color); }
+.btn-primary { --bs-btn-bg: #f0b90b; --bs-btn-border-color: #f0b90b; --bs-btn-color: #0a0a0f; --bs-btn-hover-bg: #d9a80a; --bs-btn-hover-border-color: #d9a80a; --bs-btn-hover-color: #0a0a0f; --bs-btn-active-bg: #d9a80a; --bs-btn-active-border-color: #d9a80a; }
+.period-btn.active { background: #f0b90b !important; border-color: #f0b90b !important; color: #0a0a0f !important; }
+.table { --bs-table-color: var(--bs-body-color); --bs-table-bg: transparent; --bs-table-border-color: #2a2a3a; }
 
 /* ---------- Indicador LIVE (sidebar) ---------- */
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bs-danger); flex: none; box-shadow: 0 0 6px var(--bs-danger); animation: live-pulse 2s ease-in-out infinite; }
@@ -28,33 +63,37 @@ body { overflow-x: hidden; }
 .donut-chart::after { content: ''; position: absolute; inset: 20px; background: var(--bs-card-bg, var(--bs-body-bg)); border-radius: 50%; }
 .donut-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
 
-/* ---------- Calendario de ganancias (página Métricas) — Bootstrap no tiene
-   componente de calendario, se arma con CSS grid propio. ---------- */
-.metrics-calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 12px; }
+/* ---------- Calendario de ganancias (página Métricas), estilo mapa de calor
+   (2026-09-16, pedido explícito: "mantener el calendario pero con otro
+   estilo visual") — la intensidad del color de fondo depende de cuánto ganó
+   o perdió ese día relativo al mejor/peor día del mes (ver --heat en
+   renderMetCalendar de app.js), no solo un borde de color fijo como antes.
+   Bootstrap no tiene componente de calendario, se arma con CSS grid propio. */
+.metrics-calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 12px; }
 .mc-weekday { text-align: center; font-size: 10.5px; font-weight: 700; color: var(--bs-secondary-color); text-transform: uppercase; padding-bottom: 4px; }
-.metrics-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.metrics-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .mc-day {
   aspect-ratio: 1 / 1;
   border: 1px solid var(--bs-border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 6px 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  background: var(--mc-heat-bg, transparent);
+  transition: border-color 0.15s ease, transform 0.1s ease;
 }
-.mc-day:hover { border-color: var(--bs-primary); }
+.mc-day:hover { border-color: var(--bs-primary); transform: translateY(-1px); }
 .mc-day.empty { border: none; cursor: default; }
-.mc-day.selected { background: var(--bs-tertiary-bg); border-color: var(--bs-primary); }
+.mc-day.selected { border: 2px solid var(--bs-primary); padding: 5px 3px; }
 .mc-day-num { font-size: 11px; color: var(--bs-secondary-color); font-weight: 700; }
+.mc-day.pos .mc-day-num, .mc-day.neg .mc-day-num { color: var(--bs-emphasis-color); }
 .mc-day-pnl { font-size: 10px; font-weight: 700; line-height: 1.2; text-align: center; }
-.mc-day.pos { border-color: rgba(25, 135, 84, 0.45); }
-.mc-day.pos .mc-day-pnl { color: var(--bs-success); }
-.mc-day.neg { border-color: rgba(220, 53, 69, 0.45); }
-.mc-day.neg .mc-day-pnl { color: var(--bs-danger); }
+.mc-day.pos .mc-day-pnl { color: #4ade80; }
+.mc-day.neg .mc-day-pnl { color: #f87171; }
 
 /* ---------- Animación de fila/tarjeta nueva (polling silencioso: Historial
    de Ciclos). ---------- */

@@ -270,6 +270,13 @@ function inicioSkeleton() {
         <div id="inChartContainer" style="height:220px; display:none;"></div>
       </div>
     </div>
+    <div class="card mb-3" id="inRachaCard" style="display:none;"></div>
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title text-uppercase text-body-secondary small fw-bold mb-2">🕒 Actividad reciente</div>
+        <div id="inActivityFeed"><div class="text-center text-body-secondary py-3">Cargando…</div></div>
+      </div>
+    </div>
   `;
 }
 
@@ -307,13 +314,84 @@ function renderInicioSkeleton() {
   });
 }
 
+// renderRachaCard: /api/racha — técnicamente no filtra por bot_instance_id
+// (cuenta los últimos trades cerrados de TODA la base), pero con
+// BOT4_LIVE_FOCUS=true ningún otro bot cierra trades nuevos, así que en la
+// práctica de hoy es 100% la racha de Bot 4. Si algún día se reactivan los
+// otros 4 bots (BOT4_LIVE_FOCUS=false) este endpoint dejaría de ser
+// confiable acá y habría que pedir uno escopeado por bot.
+function renderRachaCard(racha) {
+  const el = $('inRachaCard');
+  if (!racha || !racha.rachaActual) { el.style.display = 'none'; return; }
+  const esWin = racha.tipo === 'wins';
+  const modoNombre = racha.modo && racha.modo.nombre;
+  const modoBadge = modoNombre && modoNombre !== 'NORMAL'
+    ? `<span class="badge rounded-pill ${modoNombre === 'AGGRESSIVE' ? 'text-bg-warning' : 'text-bg-info'}">${modoNombre === 'AGGRESSIVE' ? '⚡ AGGRESSIVE' : `🛡️ ${esc(modoNombre)}`}</span>`
+    : '';
+  const ultimos5Html = (racha.ultimos5 || []).map((r) => (r === 'win' ? '<span class="text-success">●</span>' : '<span class="text-danger">●</span>')).join(' ');
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
+      <div>
+        <div class="text-uppercase text-body-secondary small fw-bold">Racha actual</div>
+        <div class="fs-4 fw-bold ${esWin ? 'text-success' : 'text-danger'}">${esWin ? '🔥' : '❄️'} ${racha.rachaActual} ${esWin ? 'ganancias' : 'pérdidas'} seguidas</div>
+        <div class="small text-body-secondary mt-1">Últimas 5: ${ultimos5Html || '—'} · Récord: ${racha.recordWins} wins seguidos</div>
+      </div>
+      <div class="text-end">
+        ${modoBadge}
+        ${racha.modo && racha.modo.razon ? `<div class="small text-body-secondary mt-1">${esc(racha.modo.razon)}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// renderActivityFeed: combina posiciones abiertas (= compras en curso, con
+// createdAt exacto) y ciclos cerrados (= venta, con cierreTs) en una sola
+// línea de tiempo. No incluye cambios de configuración (/drop, /tp, etc. por
+// Telegram) — el backend no guarda un historial de esos cambios, solo el
+// valor vigente, así que no hay de dónde sacar ese dato todavía.
+function activityEventHtml(e) {
+  const time = relativeTimeEs(e.ts);
+  if (e.type === 'buy') {
+    return `<div class="d-flex justify-content-between align-items-center py-2 border-bottom border-secondary-subtle">
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge rounded-pill text-bg-success">COMPRA</span>
+        ${pairIconHtml(e.pair, 18)}
+        <span class="fw-bold">${esc(e.pair.split('/')[0])}</span>
+        <span class="text-body-secondary small">${fmtUsd(e.sizeUsdt)} @ ${fmtUsdPrecise(e.entryPrice, e.entryPrice < 10 ? 4 : 2)}</span>
+      </div>
+      <span class="text-body-secondary small">${time}</span>
+    </div>`;
+  }
+  return `<div class="d-flex justify-content-between align-items-center py-2 border-bottom border-secondary-subtle">
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge rounded-pill ${e.outcome === 'win' ? 'text-bg-success' : 'text-bg-danger'}">CICLO CERRADO</span>
+      ${pairIconHtml(e.pair, 18)}
+      <span class="fw-bold">${esc(e.pair.split('/')[0])}</span>
+      <span class="${pnlClass(e.pnl)} small fw-bold">${fmtUsd(e.pnl)}</span>
+    </div>
+    <span class="text-body-secondary small">${time}</span>
+  </div>`;
+}
+function renderActivityFeed(positions, cycles) {
+  const events = [
+    ...(positions || []).map((p) => ({ type: 'buy', pair: p.pair, ts: p.createdAt, sizeUsdt: p.sizeUsdt, entryPrice: p.entryPrice })),
+    ...(cycles || []).map((c) => ({ type: 'close', pair: c.par, ts: c.cierreTs, pnl: c.pnlTotal, outcome: c.outcome })),
+  ].filter((e) => e.ts).sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 12);
+  $('inActivityFeed').innerHTML = events.length === 0
+    ? '<div class="text-center text-body-secondary py-3">Sin actividad todavía.</div>'
+    : events.map(activityEventHtml).join('');
+}
+
 async function refreshInicio() {
   try {
     const id = await getBot4Id();
     if (id === null) throw new Error('bot no encontrado');
-    const [bot, real] = await Promise.all([
+    const [bot, real, racha, positions, cycles] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson('/api/bot/4/balance-real').catch(() => null),
+      fetchJson('/api/racha').catch(() => null),
+      fetchJson(`/api/competition/bot/${id}/positions`).catch(() => []),
+      fetchJson('/api/bot/4/cycles').catch(() => []),
     ]);
     const isLive = real && real.live;
     const capital = isLive ? real.capitalRealTotal : bot.capitalActual;
@@ -327,6 +405,9 @@ async function refreshInicio() {
     $('inPnlTotal').className = `fs-5 fw-bold ${pnlClass(pnlUsd)}`;
     $('inWinRate').textContent = `${bot.winrate7d}%`;
     $('inTrades').textContent = `${bot.tradesHoy} / ${bot.trades7d}`;
+
+    renderRachaCard(racha);
+    renderActivityFeed(positions, cycles);
   } catch (err) {
     $('inCapital').textContent = '—';
   }
@@ -540,6 +621,28 @@ function donutChartHtml(entries) {
     </div>`;
 }
 
+// comparativaHtml: barras divergentes — % de cambio del precio actual vs el
+// precio promedio de entrada de cada par, para ver de un vistazo cuál está
+// más lejos/cerca de su Take Profit sin entrar a cada tarjeta. Ordenado de
+// mejor a peor.
+function comparativaHtml(pares) {
+  const rows = Object.entries(pares)
+    .filter(([, p]) => p.avgEntry !== null && p.currentPrice !== null)
+    .map(([pair, p]) => ({ pair, pct: ((p.currentPrice - p.avgEntry) / p.avgEntry) * 100 }))
+    .sort((a, b) => b.pct - a.pct);
+  if (rows.length === 0) return '<div class="text-center text-body-secondary py-3">Sin posiciones abiertas para comparar.</div>';
+  const maxAbs = Math.max(0.5, ...rows.map((r) => Math.abs(r.pct)));
+  return rows.map((r) => `
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <div class="d-flex align-items-center gap-1" style="width:64px;">${pairIconHtml(r.pair, 16)}<span class="small fw-bold">${esc(r.pair.split('/')[0])}</span></div>
+      <div class="position-relative flex-grow-1" style="height:16px; background: var(--bs-tertiary-bg); border-radius:4px;">
+        <div class="position-absolute top-0 bottom-0" style="left:1px; right:1px; width:1px; background:var(--bs-border-color);"></div>
+        <div class="position-absolute top-0 bottom-0" style="${r.pct >= 0 ? 'left:50%' : 'right:50%'}; width:${(Math.abs(r.pct) / maxAbs * 50).toFixed(1)}%; background:${r.pct >= 0 ? 'var(--bs-success)' : 'var(--bs-danger)'}; border-radius:3px;"></div>
+      </div>
+      <div class="small fw-bold ${pnlClass(r.pct)}" style="width:56px; text-align:right;">${fmtPct(r.pct)}</div>
+    </div>`).join('');
+}
+
 function posicionesSkeleton() {
   return `
     <h4 class="mb-3">💰 Posiciones — Bot 4</h4>
@@ -548,10 +651,22 @@ function posicionesSkeleton() {
       ${statBoxHtml('📥 Invertido', 'poInvertido')}
       ${statBoxHtml('📤 Libre', 'poLibre')}
     </div>
-    <div class="card mb-3">
-      <div class="card-body">
-        <div class="card-title text-uppercase text-body-secondary small fw-bold mb-2">🥧 Distribución del capital</div>
-        <div id="poDonutPanel" class="text-center text-body-secondary py-3">Cargando…</div>
+    <div class="row row-cols-1 row-cols-lg-2 g-3 mb-3">
+      <div class="col">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="card-title text-uppercase text-body-secondary small fw-bold mb-2">🥧 Distribución del capital</div>
+            <div id="poDonutPanel" class="text-center text-body-secondary py-3">Cargando…</div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="card-title text-uppercase text-body-secondary small fw-bold mb-2">⚖️ Comparativa — quién va mejor ahora</div>
+            <div id="poComparativaPanel" class="text-center text-body-secondary py-3">Cargando…</div>
+          </div>
+        </div>
       </div>
     </div>
     <div id="poErrorBanner"></div>
@@ -587,6 +702,7 @@ async function refreshPosiciones() {
       { label: 'Libre', value: bot.capitalLibre, color: 'var(--bs-secondary-color)' },
     ];
     $('poDonutPanel').innerHTML = donutChartHtml(donutEntries);
+    $('poComparativaPanel').innerHTML = comparativaHtml(path.pares);
 
     // Saldo REAL de Binance (2026-09-16, fix: el panel tenía BTC/ETH/BNB
     // hardcodeados a mano — cualquier par nuevo activado con /activar por
@@ -698,9 +814,35 @@ function historialSkeleton() {
       ${statBoxHtml('🎯 Win Rate', 'hiWinRate')}
       ${statBoxHtml('📈 PnL total', 'hiPnlTotal')}
     </div>
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="card-title text-uppercase text-body-secondary small fw-bold mb-2">📊 Comparativa por cripto</div>
+        <div id="hiComparativaPanel" class="text-center text-body-secondary py-3">Cargando…</div>
+      </div>
+    </div>
     <div id="hiErrorBanner"></div>
     <div id="dcaHistory"><div class="text-center text-body-secondary py-4">Cargando…</div></div>
   `;
+}
+// comparativaPorCriptoHtml: agrupa los ciclos cerrados por par — cuántos
+// ciclos, win rate y PnL total de cada uno, ordenado de mejor a peor. Mismo
+// dato que ya se ve en las tarjetas de Historial, pero uno al lado del otro
+// en vez de tener que sumarlo a mano.
+function comparativaPorCriptoHtml(cycles) {
+  const byPair = {};
+  (cycles || []).forEach((c) => {
+    if (!byPair[c.par]) byPair[c.par] = { count: 0, wins: 0, pnl: 0 };
+    byPair[c.par].count += 1;
+    if (c.outcome === 'win') byPair[c.par].wins += 1;
+    byPair[c.par].pnl += c.pnlTotal;
+  });
+  const rows = Object.entries(byPair).sort((a, b) => b[1].pnl - a[1].pnl);
+  if (rows.length === 0) return '<div class="text-center text-body-secondary py-2">Sin ciclos cerrados todavía.</div>';
+  return rows.map(([pair, s]) => kv(
+    `${pairIconHtml(pair, 18)} ${esc(pair.split('/')[0])} · ${s.count} ciclos · ${Math.round((s.wins / s.count) * 100)}% WR`,
+    fmtUsd(s.pnl),
+    pnlClass(s.pnl),
+  )).join('');
 }
 function renderHistorialSkeleton() {
   $('content').innerHTML = historialSkeleton();
@@ -720,6 +862,7 @@ async function refreshHistorial() {
   try {
     const cycles = await fetchJson('/api/bot/4/cycles');
     renderHistorialSummary(cycles || []);
+    $('hiComparativaPanel').innerHTML = comparativaPorCriptoHtml(cycles);
     renderDcaCyclesIncremental(cycles || []);
     $('hiErrorBanner').innerHTML = '';
   } catch (err) {
@@ -807,15 +950,26 @@ function renderMetCalendar() {
   const primerDiaSemana = (new Date(Date.UTC(metCalYear, metCalMonth, 1)).getUTCDay() + 6) % 7;
   const diasEnMes = new Date(Date.UTC(metCalYear, metCalMonth + 1, 0)).getUTCDate();
 
+  // Mapa de calor (2026-09-16): intensidad de fondo proporcional al pnl del
+  // día relativo al mayor |pnl| del mes — un día que ganó/perdió poco casi
+  // no se nota, el mejor/peor día del mes se ve bien saturado. Mismo
+  // concepto de calendario que antes, solo cambia cómo se lee de un vistazo.
+  const maxAbsPnl = Math.max(1, ...Object.values(metDailyMap).map((r) => Math.abs(r.pnl)));
   let html = '';
   for (let i = 0; i < primerDiaSemana; i++) html += '<div class="mc-day empty"></div>';
   for (let dia = 1; dia <= diasEnMes; dia++) {
     const fecha = `${metCalYear}-${String(metCalMonth + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
     const row = metDailyMap[fecha];
     const clases = ['mc-day'];
-    if (row) clases.push(row.pnl >= 0 ? 'pos' : 'neg');
+    let heatStyle = '';
+    if (row) {
+      clases.push(row.pnl >= 0 ? 'pos' : 'neg');
+      const intensidad = 0.12 + (Math.abs(row.pnl) / maxAbsPnl) * 0.55;
+      const rgb = row.pnl >= 0 ? 'var(--bs-success-rgb)' : 'var(--bs-danger-rgb)';
+      heatStyle = ` style="--mc-heat-bg: rgba(${rgb}, ${intensidad.toFixed(2)});"`;
+    }
     if (fecha === metSelectedFecha) clases.push('selected');
-    html += `<div class="${clases.join(' ')}" data-fecha="${fecha}">
+    html += `<div class="${clases.join(' ')}" data-fecha="${fecha}"${heatStyle}>
       <span class="mc-day-num">${dia}</span>
       ${row ? `<span class="mc-day-pnl">${row.pnl >= 0 ? '+' : ''}${fmtUsd(row.pnl)}</span>` : ''}
     </div>`;
@@ -942,6 +1096,12 @@ function settingsSkeleton() {
     </div>
     <div class="card mb-3">
       <div class="card-body">
+        <div class="card-title">🩺 Salud del sistema</div>
+        <div id="setHealth"><div class="small text-body-secondary">Cargando…</div></div>
+      </div>
+    </div>
+    <div class="card mb-3">
+      <div class="card-body">
         <div class="mb-3">
           <label class="form-label small text-uppercase fw-bold text-body-secondary">API base (Cloudflare Tunnel)</label>
           <input type="text" class="form-control" id="apiBaseInput" value="${esc(API_BASE)}">
@@ -991,6 +1151,20 @@ async function refreshSettings() {
       + kv('Capital total', fmtUsd(data.capitalTotal));
   } catch (err) {
     $('setStatus').innerHTML = '<div class="alert alert-secondary">No se pudo conectar a la API.</div>';
+  }
+  try {
+    const health = await fetchJson('/api/health');
+    const svc = (ok, label) => `<span class="badge rounded-pill ${ok ? 'text-bg-success' : 'text-bg-danger'} me-1 mb-1">${ok ? '✅' : '❌'} ${label}</span>`;
+    $('setHealth').innerHTML = `
+      <div class="mb-2">
+        ${svc(health.binance && health.binance.ok, `Binance (${health.binance ? health.binance.ms : '—'}ms)`)}
+        ${svc(health.postgresql && health.postgresql.ok, 'PostgreSQL')}
+        ${svc(health.ollama && health.ollama.ok, 'Ollama')}
+        ${svc(health.cloudflared && health.cloudflared.ok, 'Cloudflare Tunnel')}
+      </div>
+      ${kv('Errores (24h)', `${health.errores ? health.errores.total24h : 0}${health.errores && health.errores.noResueltos > 0 ? ` (${health.errores.noResueltos} sin resolver)` : ''}`, health.errores && health.errores.total24h > 0 ? 'text-warning' : 'text-success')}`;
+  } catch (err) {
+    $('setHealth').innerHTML = '<div class="alert alert-secondary">No se pudo consultar la salud del sistema.</div>';
   }
   try {
     const posts = await fetchJson('/api/square-posts?limit=10');

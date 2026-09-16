@@ -87,19 +87,21 @@ a { color: var(--green); }
   gap: 12px;
   width: 100%;
   min-height: 42px;
-  padding: 0 12px;
+  padding: 0 12px 0 15px;
   background: transparent;
   border: none;
+  border-left: 3px solid transparent;
   border-radius: 8px;
   color: var(--text-sec);
   font-size: 13.5px;
   font-weight: 600;
   text-align: left;
   cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
   -webkit-tap-highlight-color: transparent;
 }
 .nav-item:hover { background: var(--active-bg); color: var(--text); }
-.nav-item.active { background: var(--active-bg); color: var(--yellow); }
+.nav-item.active { background: var(--active-bg); color: var(--yellow); border-left-color: var(--yellow); }
 .nav-icon { font-size: 15px; flex: none; }
 
 .sidebar-overlay {
@@ -254,11 +256,30 @@ table.data-table td { padding: 9px 10px; border-top: 1px solid var(--border); }
   padding: 16px;
 }
 .pair-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; gap: 10px; }
-.pair-card-name { font-weight: 700; font-size: 15px; }
+.pair-card-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
 .pair-card-ring { flex: none; }
 .pair-card-ring .ring-text { font-size: 13px; font-weight: 700; fill: var(--text); }
 /* Separador del bloque "TP actual / Vende en / Falta subir" (2026-08-23) */
 .tp-divider { border-top: 1px dashed var(--border); margin: 8px 0; }
+
+/* ---------- Ícono real por cripto (2026-09-16, pedido explícito: "usa los
+   iconos reales de las cryptos") — cryptocurrency-icons vía jsdelivr, con
+   fallback a emoji si el símbolo no existe en ese set (ver pairIconHtml en
+   app.js). ---------- */
+.pair-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; vertical-align: middle; }
+.pair-icon img { display: block; border-radius: 50%; }
+.pair-icon-fallback { align-items: center; justify-content: center; border-radius: 50%; background: var(--active-bg); font-size: 0.7em; }
+
+/* ---------- Donut de distribución de capital (2026-09-16) — conic-gradient
+   nativo, sin librería extra para un solo gráfico circular. ---------- */
+.donut-wrap { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.donut-chart { width: 120px; height: 120px; border-radius: 50%; flex: none; position: relative; }
+.donut-chart::after { content: ''; position: absolute; inset: 20px; background: var(--card-bg); border-radius: 50%; }
+.donut-legend { display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 160px; }
+.donut-legend-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.donut-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.donut-label { flex: 1; color: var(--text-sec); }
+.donut-value { font-weight: 700; white-space: nowrap; }
 
 /* ---------- Historial de Ciclos (Bot 4, 2026-08-24, pedido explícito:
    "reemplazar DCA Execution History con vista de ciclos") — <details>/

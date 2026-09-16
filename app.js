@@ -209,9 +209,9 @@ function inicioSkeleton() {
       </div>
     </div>
     <div class="stat-row">
-      <div class="stat-box"><div class="stat-label">PnL Total</div><div class="stat-value" id="inPnlTotal">—</div></div>
-      <div class="stat-box"><div class="stat-label">Win Rate (7d)</div><div class="stat-value" id="inWinRate">—</div></div>
-      <div class="stat-box"><div class="stat-label">Trades (hoy / 7d)</div><div class="stat-value" id="inTrades">—</div></div>
+      <div class="stat-box"><div class="stat-label">📈 PnL Total</div><div class="stat-value" id="inPnlTotal">—</div></div>
+      <div class="stat-box"><div class="stat-label">🎯 Win Rate (7d)</div><div class="stat-value" id="inWinRate">—</div></div>
+      <div class="stat-box"><div class="stat-label">🔄 Trades (hoy / 7d)</div><div class="stat-value" id="inTrades">—</div></div>
     </div>
     <div class="chart-card">
       <div class="chart-card-title">Capital en el tiempo</div>
@@ -297,6 +297,18 @@ const PAIR_COLORS = { BTC: '#f7931a', ETH: '#8a92b2', BNB: '#f0b90b', SOL: '#14f
 const PAIR_EMOJI = { BTC: '₿', ETH: 'Ξ', BNB: '🔶', SOL: '◎' };
 function pairColor(pair) { return PAIR_COLORS[pair.split('/')[0]] || 'var(--green)'; }
 function pairEmoji(pair) { return PAIR_EMOJI[pair.split('/')[0]] || '●'; }
+// pairIconHtml: ícono real de la cripto (cryptocurrency-icons vía jsdelivr,
+// CDN público, sin API key). Si el símbolo no está en ese set (par muy
+// nuevo/raro activado por Telegram), el onerror esconde el <img> roto y
+// muestra el emoji de PAIR_EMOJI como respaldo — nunca se rompe visualmente.
+function pairIconHtml(pair, size = 22) {
+  const sym = pair.split('/')[0];
+  const url = `https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/${sym.toLowerCase()}.svg`;
+  return `<span class="pair-icon" style="width:${size}px;height:${size}px;">` +
+    `<img src="${url}" alt="${esc(sym)}" width="${size}" height="${size}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">` +
+    `<span class="pair-icon-fallback" style="display:none;width:${size}px;height:${size}px;">${pairEmoji(pair)}</span>` +
+    `</span>`;
+}
 function pairIdPrefix(pair) { return `dca-${pair.split('/')[0].toLowerCase()}`; }
 
 // progressRingSvg/updateProgressRing: anillo circular de "compras/maxCompras"
@@ -329,7 +341,7 @@ function accumulationPairBlockSkeleton(pair, idPrefix) {
   return `
     <div class="pair-card" style="--pair-color:${color}">
       <div class="pair-card-top">
-        <div class="pair-card-name">${pairEmoji(pair)} ${esc(pair.split('/')[0])}</div>
+        <div class="pair-card-name">${pairIconHtml(pair, 24)} ${esc(pair.split('/')[0])}</div>
         <div class="pair-card-ring" id="${idPrefix}-ring">${progressRingSvg(color)}</div>
       </div>
       <div class="stat-sub" id="${idPrefix}-ciclo" style="margin-bottom:10px;">—</div>
@@ -453,15 +465,45 @@ function renderThoughtsPanel(data) {
     </div>`;
 }
 
+// donutChartHtml: distribución del capital por par + libre, con
+// conic-gradient (soportado en todo navegador evergreen, sin librería de
+// gráficos extra para un solo donut). entries: [{ label, value, color }].
+function donutChartHtml(entries) {
+  const total = entries.reduce((s, e) => s + e.value, 0);
+  if (total <= 0) return '<div class="empty-state">Sin capital para distribuir todavía.</div>';
+  let acc = 0;
+  const stops = entries.filter((e) => e.value > 0).map((e) => {
+    const start = (acc / total) * 360;
+    acc += e.value;
+    const end = (acc / total) * 360;
+    return `${e.color} ${start.toFixed(1)}deg ${end.toFixed(1)}deg`;
+  }).join(', ');
+  const legend = entries.map((e) => `
+    <div class="donut-legend-row">
+      <span class="donut-dot" style="background:${e.color}"></span>
+      <span class="donut-label">${e.icon || ''} ${esc(e.label)}</span>
+      <span class="donut-value">${fmtUsd(e.value)} (${Math.round((e.value / total) * 100)}%)</span>
+    </div>`).join('');
+  return `
+    <div class="donut-wrap">
+      <div class="donut-chart" style="background: conic-gradient(${stops});"></div>
+      <div class="donut-legend">${legend}</div>
+    </div>`;
+}
+
 function posicionesSkeleton() {
   return `
     <div class="page-header">
       <div class="ph-title">POSICIONES — BOT 4</div>
     </div>
     <div class="stat-row">
-      <div class="stat-box"><div class="stat-label">Capital Total</div><div class="stat-value" id="poCapitalTotal">—</div></div>
-      <div class="stat-box"><div class="stat-label">Invertido</div><div class="stat-value" id="poInvertido">—</div></div>
-      <div class="stat-box"><div class="stat-label">Libre</div><div class="stat-value" id="poLibre">—</div></div>
+      <div class="stat-box"><div class="stat-label">💰 Capital Total</div><div class="stat-value" id="poCapitalTotal">—</div></div>
+      <div class="stat-box"><div class="stat-label">📥 Invertido</div><div class="stat-value" id="poInvertido">—</div></div>
+      <div class="stat-box"><div class="stat-label">📤 Libre</div><div class="stat-value" id="poLibre">—</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">🥧 Distribución del capital</div>
+      <div id="poDonutPanel"><div class="empty-state skeleton">Cargando…</div></div>
     </div>
     <div id="poErrorBanner"></div>
     <div id="poRealBalancePanel"></div>
@@ -491,13 +533,19 @@ async function refreshPosiciones() {
     $('poInvertido').textContent = fmtUsd(bot.capitalInvertido);
     $('poLibre').textContent = fmtUsd(bot.capitalLibre);
 
+    const donutEntries = [
+      ...Object.entries(path.pares).map(([pair, p]) => ({ label: pair.split('/')[0], value: p.totalInvested, color: pairColor(pair) })),
+      { label: 'Libre', value: bot.capitalLibre, color: 'var(--text-sec)' },
+    ];
+    $('poDonutPanel').innerHTML = donutChartHtml(donutEntries);
+
     // Saldo REAL de Binance (2026-09-16, fix: el panel tenía BTC/ETH/BNB
     // hardcodeados a mano — cualquier par nuevo activado con /activar por
     // Telegram no aparecía acá aunque la API ya lo trajera dinámico, ver
     // fetchBot4BalanceReal en server.js). Ahora itera real.posiciones tal
     // cual venga, sin asumir cuáles/cuántos pares hay.
     const posicionesHtml = (real && real.live)
-      ? Object.entries(real.posiciones).map(([sym, p]) => `<div class="kv-row"><span class="label">${pairEmoji(`${sym}/USDT`)} ${esc(sym)}</span><span class="value">${p.cantidad.toFixed(6)} (${fmtUsd(p.valorUsd)})</span></div>`).join('')
+      ? Object.entries(real.posiciones).map(([sym, p]) => `<div class="kv-row"><span class="label" style="display:flex;align-items:center;gap:6px;">${pairIconHtml(`${sym}/USDT`, 16)} ${esc(sym)}</span><span class="value">${p.cantidad.toFixed(6)} (${fmtUsd(p.valorUsd)})</span></div>`).join('')
       : '';
     $('poRealBalancePanel').innerHTML = (real && real.live) ? `
       <div class="panel" style="border:1px solid #ff3b3b55;">
@@ -541,7 +589,7 @@ function cycleCardHtml(c, extraClass = '') {
       <summary>
         <div class="cycle-summary-row">
           <div class="cycle-summary-main">
-            <span class="cycle-pair">${pairEmoji(c.par)} ${esc(c.par)}</span>
+            <span class="cycle-pair">${pairIconHtml(c.par, 18)} ${esc(c.par)}</span>
             <span class="cycle-time-row">Inicio: ${formatTimePeruCompact(c.inicioTs)}</span>
             <span class="cycle-time-row">Fin: ${formatTimePeruCompact(c.cierreTs)}</span>
             <span class="cycle-meta">(${esc(c.duracion)}) · ${c.numCompras} compras · ${fmtUsd(c.totalInvertido)} invertido</span>
@@ -592,9 +640,9 @@ function historialSkeleton() {
       <div class="stat-sub" style="margin-top:6px;">Cada tarjeta es un ciclo completo: todas las compras DCA de un par, cerradas juntas en la misma venta.</div>
     </div>
     <div class="stat-row">
-      <div class="stat-box"><div class="stat-label">Ciclos cerrados</div><div class="stat-value" id="hiTotalCiclos">—</div></div>
-      <div class="stat-box"><div class="stat-label">Win Rate</div><div class="stat-value" id="hiWinRate">—</div></div>
-      <div class="stat-box"><div class="stat-label">PnL total</div><div class="stat-value" id="hiPnlTotal">—</div></div>
+      <div class="stat-box"><div class="stat-label">📜 Ciclos cerrados</div><div class="stat-value" id="hiTotalCiclos">—</div></div>
+      <div class="stat-box"><div class="stat-label">🎯 Win Rate</div><div class="stat-value" id="hiWinRate">—</div></div>
+      <div class="stat-box"><div class="stat-label">📈 PnL total</div><div class="stat-value" id="hiPnlTotal">—</div></div>
     </div>
     <div id="hiErrorBanner"></div>
     <div class="table-wrap" id="dcaHistory"><div class="empty-state skeleton">Cargando…</div></div>

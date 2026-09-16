@@ -8,46 +8,43 @@ Tunnel** con HTTPS, y se aloja gratis en GitHub Pages.
 La API **solo tiene endpoints GET**. No expone keys de Binance/Telegram/DB,
 no permite modificar el bot desde la web.
 
-## Secciones (2026-08-19, rediseño completo: sidebar + vista por bot)
+## Secciones (2026-09-16, rediseño: "todo gira en torno a Bot 4")
 
-Reemplaza el dashboard de tabs (2026-08-16) por una SPA tipo "institutional
-trading terminal": **sidebar fijo** a la izquierda (colapsable con hamburger
-en mobile, `style.css`/`app.js` sin build) + **una página dedicada por
-bot/estrategia** a la derecha, con router por hash (`#overview`, `#motorb`,
-etc.) — cambiar de bot no pega al servidor de más de lo necesario, cada
-página cachea sus propios requests (ver `CACHE_TTL_MS` en `app.js`).
+El sistema quedó reducido a un solo bot operando con dinero real — Bot 2,
+Bot 3, Motor A y Motor B fueron desactivados en el backend (ver
+`BOT4_LIVE_FOCUS` en `nuvera-trading-bot/src/core/bot.js`) — así que este
+dashboard dejó de ser un router de 5 bots en competencia (sidebar de 8
+secciones, la mayoría apuntando a bots pausados) para ser la vista de un
+solo bot: **sidebar fijo** a la izquierda (colapsable con hamburger en
+mobile) + 5 páginas, router por hash.
 
 Páginas:
 
-1. **Overview** (`#overview`) — portfolio total + PnL de hoy + gráfica de
-   capital (24H/7D/30D) + 5 cards de rendimiento diario (uno por bot, con
-   sparkline) para Motor B, Motor A, Bot 2 Grid, Bot 3 DCA y Bot 4 DCA. Todo
-   sale de un solo request a `/api/overview`.
-2. **Motor B** (`#motorb`) — Portfolio/Orders/History como sub-tabs, stats de
-   avg profit/trade y max drawdown 24h (`/api/bot/motorb/stats`).
-3. **Motor A DCA** (`#motora`) — el DCA REAL del bot principal (smartDCA,
-   capital real, NO es un bot de competencia) — antes no tenía página propia
-   en el dashboard. Accumulation path BTC/ETH + próximo trigger de compra
-   (`/api/bot/motora/stats`).
-4. **Bot 2 Grid** (`#bot2`) — niveles de grilla BTC/ETH (`/api/bot/grid/
-   levels`) con órdenes BUY/SELL pendientes y el precio actual marcado.
-5. **Bot 3 DCA Agresivo** / **Bot 4 DCA BTC/ETH** (`#bot3`/`#bot4`) —
-   accumulation path + historial de ejecución (`/api/bot/dca/:id/path`, el
-   `:id` se resuelve en runtime vía `/api/competition/ranking`, nunca
-   hardcodeado).
-6. **Settings** (`#settings`) — override de la URL de la API (mismo mecanismo
-   `?api=`/localStorage de siempre) y estado general del bot.
+1. **Inicio** (`#inicio`) — capital total real (Binance), PnL, win rate y
+   gráfica de capital (24H/7D/30D). Sale de `/api/competition/bot/:id` +
+   `/api/bot/4/balance-real` + `/api/capital-chart`.
+2. **Posiciones** (`#posiciones`) — saldo real en Binance (BTC/ETH/BNB +
+   USDT libre), "qué está pensando el bot" (`/api/bot/4/thoughts`) y
+   Accumulation Path por par (`/api/bot/dca/:id/path`, el `:id` se resuelve
+   en runtime vía `/api/competition/ranking`, nunca hardcodeado).
+3. **Historial** (`#historial`) — Historial de Ciclos: una tarjeta
+   expandible por cada ciclo DCA cerrado (`/api/bot/4/cycles`).
+4. **Métricas** (`#metricas`) — calendario de ganancias, gráfica de barras
+   por día, resumen del mes y top trades (`/api/metrics/daily|monthly|
+   top-trades`).
+5. **Settings** (`#settings`) — override de la URL de la API (mismo mecanismo
+   `?api=`/localStorage de siempre) y borradores de Binance Square.
 
-Polling: cada página activa se refresca cada 20s (pausado por completo
-cuando la pestaña está en segundo plano, `visibilitychange`); estado de
-sub-tab/período seleccionado se preserva entre refreshes.
+Polling: cada página activa se refresca cada 5s, pero `fetchJson` cachea por
+endpoint con su propio TTL (`CACHE_TTL_MS` en `app.js`, 15-60s según qué tan
+crítico es el dato), así que la red real solo se golpea con esa frecuencia —
+pausado por completo cuando la pestaña está en segundo plano
+(`visibilitychange`).
 
-Endpoints nuevos en `src/api/server.js` (2026-08-19): `/api/overview`,
-`/api/bot/motorb/stats`, `/api/bot/grid/levels`, `/api/bot/dca/:id/path`,
-`/api/bot/motora/stats` — todos de solo lectura, reusan `metrics`/`smartDCA`/
-`hybridAllocation` en vez de recalcular. El resto de las páginas reusa
-`/api/competition/bot/:id*` tal cual (con `'motorB'` como id especial para
-Motor B, igual que el tab Competencia del diseño anterior).
+Si alguna vez se reactivan los 5 bots (`BOT4_LIVE_FOCUS=false`), este
+dashboard NO los vuelve a mostrar solo — habría que revivir las páginas de
+Motor A/B y Bot 2/3 (se pueden recuperar del historial de git de este
+repo, commit anterior al rediseño del 2026-09-16).
 
 ## Arquitectura actual
 

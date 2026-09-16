@@ -1,5 +1,7 @@
-/* Nuvera Bot — Dashboard institucional (2026-08-19, rediseño completo:
-   sidebar + vista individual por bot/estrategia). Vanilla CSS, sin build. */
+/* Nuvera Bot — Dashboard de Bot 4 (2026-09-16, rediseño: "todo gira en
+   torno a Bot 4" — sidebar simplificado a Inicio/Posiciones/Historial/
+   Métricas/Settings, sin rutas muertas de los bots de prueba desactivados).
+   Tema oscuro tipo terminal de trading, refinado. Vanilla CSS, sin build. */
 
 :root {
   --bg: #0a0a0f;
@@ -72,7 +74,9 @@ a { color: var(--green); }
 }
 .brand-icon { font-size: 22px; }
 .brand-name { font-weight: 700; font-size: 14px; letter-spacing: 0.4px; }
-.brand-sub { font-size: 11px; color: var(--yellow); letter-spacing: 0.3px; margin-top: 1px; }
+.brand-sub { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-sec); letter-spacing: 0.3px; margin-top: 3px; }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); flex: none; box-shadow: 0 0 6px var(--red); animation: live-pulse 2s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .sidebar-nav { display: flex; flex-direction: column; padding: 12px 10px; gap: 2px; flex: 1; overflow-y: auto; }
 .sidebar-footer { padding: 10px; border-top: 1px solid var(--border); }
@@ -113,10 +117,28 @@ a { color: var(--green); }
   max-width: 1280px;
 }
 
-/* ---------- Page header (Overview) ---------- */
+/* ---------- Page header (Inicio) ---------- */
 .page-header { margin-bottom: 18px; }
+/* .page-header.card (2026-09-16): versión "hero" para Inicio — mismo
+   contenido, envuelto en una tarjeta con acento de color arriba, para que el
+   capital total se lea como el dato principal de toda la página. */
+.page-header.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  position: relative;
+  overflow: hidden;
+}
+.page-header.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--green), var(--yellow));
+}
 .ph-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-sec); font-weight: 700; }
-.ph-value { font-size: 38px; font-weight: 700; margin-top: 4px; line-height: 1.1; }
+.ph-value { font-size: 38px; font-weight: 700; margin-top: 4px; line-height: 1.1; letter-spacing: -0.5px; }
 .ph-sub { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 14px; font-weight: 600; flex-wrap: wrap; }
 
 .pill {
@@ -181,52 +203,9 @@ a { color: var(--green); }
 .chart-el { width: 100%; height: 220px; }
 .chart-placeholder { height: 220px; display: flex; align-items: center; justify-content: center; color: var(--text-sec); font-size: 13px; text-align: center; padding: 0 12px; }
 
-/* ---------- Overview: strategy cards grid ---------- */
 .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-sec); font-weight: 700; margin: 22px 0 12px; }
-.bots-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
-.bot-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-.bot-card:hover { border-color: var(--yellow); }
-.bc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
-.bc-name { font-weight: 700; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
-.bc-sub { font-size: 12px; color: var(--text-sec); margin-bottom: 10px; }
-.bc-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px; margin-top: 4px; }
-.bc-row .label { color: var(--text-sec); }
-.bc-row .value { font-weight: 700; }
-.bc-spark { margin-top: 10px; height: 34px; }
-.sparkline { width: 100%; height: 100%; display: block; }
 
-/* ---------- Bot detail page ---------- */
-.bot-page-header { margin-bottom: 6px; }
-.bph-title { font-size: 19px; font-weight: 700; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.bph-capital { font-size: 22px; font-weight: 700; margin-top: 8px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.bph-capital .pct { font-size: 14px; font-weight: 600; }
-
-.subnav { display: flex; gap: 8px; margin: 14px 0; border-bottom: 1px solid var(--border); }
-.subnav-btn {
-  min-height: 40px;
-  padding: 0 4px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-sec);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  margin-right: 18px;
-  -webkit-tap-highlight-color: transparent;
-}
-.subnav-btn.active { color: var(--text); border-bottom-color: var(--yellow); }
-.subnav-panel { display: none; }
-.subnav-panel.active { display: block; }
-
-/* ---------- Tables (trades / grid ladder / dca history) ---------- */
+/* ---------- Tables (Historial de Ciclos / grid interno de compras) ---------- */
 .table-wrap { overflow-x: auto; }
 table.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 480px; }
 table.data-table th {
@@ -239,22 +218,10 @@ table.data-table th {
   letter-spacing: 0.3px;
 }
 table.data-table td { padding: 9px 10px; border-top: 1px solid var(--border); }
-/* Columna Time con hora servidor (UTC) + hora Perú (2026-08-23, pedido
-   explícito) — ver formatTimePeru() en app.js. */
-.time-utc { display: block; font-size: 0.85em; color: var(--text-sec); }
-.time-peru { display: block; font-size: 0.9em; color: var(--text); font-weight: 500; }
-table.data-table tr.row-buy td:first-child, table.data-table tr.side-buy .side-cell { color: var(--green); }
-table.data-table tr.row-sell td:first-child, table.data-table tr.side-sell .side-cell { color: var(--red); }
 /* Fila nueva insertada por el polling silencioso (2026-08-22, pedido
    explícito Bot 3/4: "animación suave de entrada" al aparecer un trade
    nuevo en el historial sin recargar la página). */
 @keyframes row-fade-in { from { opacity: 0; background: rgba(240, 185, 11, 0.18); } to { opacity: 1; background: transparent; } }
-table.data-table tr.row-new { animation: row-fade-in 1.2s ease-out; }
-.badge-status { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; display: inline-block; }
-.badge-status.pending-sell { background: rgba(255,68,68,0.12); color: var(--red); }
-.badge-status.pending-buy { background: rgba(0,255,136,0.12); color: var(--green); }
-.badge-status.current { background: rgba(240,185,11,0.16); color: var(--yellow); }
-.badge-status.filled { background: rgba(100,116,139,0.16); color: var(--text-sec); }
 
 /* ---------- Panels / cards genéricos ---------- */
 .panel {
@@ -389,11 +356,7 @@ table.cycle-buys-table th, table.cycle-buys-table td { padding: 6px 8px; font-si
 
 /* ---------- Desktop (>=900px) ---------- */
 @media (min-width: 900px) {
-  .bots-grid { grid-template-columns: repeat(2, 1fr); }
   .two-col { grid-template-columns: 1.3fr 1fr; align-items: start; }
   .stat-row { grid-template-columns: repeat(3, 1fr); }
   .metrics-top-grid { grid-template-columns: 1fr 1fr; }
-}
-@media (min-width: 1180px) {
-  .bots-grid { grid-template-columns: repeat(3, 1fr); }
 }

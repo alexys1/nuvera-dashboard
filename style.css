@@ -1,101 +1,291 @@
-/* Nuvera Bot — Dashboard de Bot 4 (2026-09-16, 5to rediseño: tema propio
-   "Binance-like" sobre Bootstrap 5, ver index.html/app.js). Bootstrap (vía
-   CDN) resuelve layout/cards/badges/accordion/grid — el gris del tema
-   data-bs-theme="dark" por defecto no convenció ("todo feo con este color"),
-   así que acá se pisan las custom properties de Bootstrap con una paleta
-   propia (negro + dorado, como la app real de Binance) en vez de tocar el
-   markup — Bootstrap sigue siendo la base, solo cambia la piel. Fuera de
-   estas variables, acá solo quedan las piezas que Bootstrap no tiene:
-   colores por cripto, anillo de progreso SVG, donut de distribución de
-   capital, calendario de Métricas (estilo mapa de calor), pulso LIVE. */
+/* Nuvera Bot — Dashboard de Bot 4 (2026-09-16, 6to rediseño: se saca
+   Bootstrap, diseño propio). Pedido explícito: "no me gusta bootstrap, hazlo
+   tú" + el calendario de Métricas se veía "tosco", ocupando casi toda la
+   pantalla — el problema real era `grid-template-columns: repeat(7, 1fr)`
+   dentro de una tarjeta ancha: 1fr se estira al ancho disponible sin techo,
+   así que en desktop cada celda terminaba enorme. Este rediseño fija un
+   sistema de tamaños contenido (escala de espaciado/tipografía chica,
+   ancho tope en cada grilla que lo necesita) en vez de dejar que el
+   contenido se estire solo. */
 
-:root,
-[data-bs-theme="dark"] {
-  --bs-body-bg: #0a0a0f;
-  --bs-body-color: #e2e8f0;
-  --bs-emphasis-color: #ffffff;
-  --bs-secondary-color: #94a3b8;
-  --bs-tertiary-bg: #111118;
-  --bs-secondary-bg: #16161f;
-  --bs-border-color: #2a2a3a;
-  --bs-border-color-translucent: #2a2a3a;
-  --bs-primary: #f0b90b;
-  --bs-primary-rgb: 240, 185, 11;
-  --bs-link-color: #f0b90b;
-  --bs-link-color-rgb: 240, 185, 11;
-  --bs-link-hover-color: #ffd23f;
+:root {
+  --bg: #0a0a0f;
+  --surface: #14141c;
+  --surface-2: #1c1c28;
+  --border: #262631;
+  --text: #e7e9ee;
+  --text-dim: #8b8fa3;
+  --accent: #f0b90b;
+  --accent-dim: #caa008;
+  --green: #16c784;
+  --red: #ea3943;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --sidebar-w: 216px;
 }
-body { overflow-x: hidden; background: var(--bs-body-bg); }
 
-/* Componentes con variables propias que no heredan de los tokens de arriba
-   (ver docs de Bootstrap: .card/.offcanvas/.accordion definen su propio
-   fondo/borde local, con fallback a los tokens globales SOLO si no se
-   pisan acá). */
-.card { --bs-card-bg: #16161f; --bs-card-border-color: #2a2a3a; }
-.offcanvas { --bs-offcanvas-bg: #111118; --bs-offcanvas-border-color: #2a2a3a; --bs-offcanvas-color: var(--bs-body-color); }
-.accordion { --bs-accordion-bg: #16161f; --bs-accordion-border-color: #2a2a3a; --bs-accordion-active-bg: #1c1c28; --bs-accordion-active-color: #f0b90b; --bs-accordion-btn-color: var(--bs-body-color); }
-.nav-pills { --bs-nav-pills-link-active-bg: #f0b90b; }
-.nav-pills .nav-link.active { color: #0a0a0f; font-weight: 700; }
-.nav-pills .nav-link { color: var(--bs-secondary-color); }
-.nav-pills .nav-link:hover { color: var(--bs-body-color); }
-.btn-primary { --bs-btn-bg: #f0b90b; --bs-btn-border-color: #f0b90b; --bs-btn-color: #0a0a0f; --bs-btn-hover-bg: #d9a80a; --bs-btn-hover-border-color: #d9a80a; --bs-btn-hover-color: #0a0a0f; --bs-btn-active-bg: #d9a80a; --bs-btn-active-border-color: #d9a80a; }
-.period-btn.active { background: #f0b90b !important; border-color: #f0b90b !important; color: #0a0a0f !important; }
-.table { --bs-table-color: var(--bs-body-color); --bs-table-bg: transparent; --bs-table-border-color: #2a2a3a; }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-x: hidden;
+  max-width: 100vw;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; }
+a { color: var(--accent); }
+hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
 
-/* ---------- Indicador LIVE (sidebar) ---------- */
-.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bs-danger); flex: none; box-shadow: 0 0 6px var(--bs-danger); animation: live-pulse 2s ease-in-out infinite; }
-@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+/* ---------- Layout ---------- */
+.app { display: flex; min-height: 100vh; }
 
-/* ---------- Ícono real por cripto (cryptocurrency-icons vía jsdelivr, ver
-   pairIconHtml en app.js) — fallback a emoji si el símbolo no existe en ese
-   set (par nuevo/raro activado por Telegram), nunca se rompe visualmente. */
+.hamburger {
+  position: fixed;
+  top: calc(10px + var(--safe-top));
+  left: 12px;
+  z-index: 60;
+  width: 38px;
+  height: 38px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 17px;
+  cursor: pointer;
+  display: none;
+}
+
+.sidebar {
+  width: var(--sidebar-w);
+  flex: none;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  padding-top: var(--safe-top);
+}
+.sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 18px 16px; border-bottom: 1px solid var(--border); }
+.brand-icon { font-size: 20px; }
+.brand-name { font-weight: 700; font-size: 13px; letter-spacing: 0.4px; }
+.brand-sub { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); box-shadow: 0 0 5px var(--red); animation: live-pulse 2s ease-in-out infinite; }
+@keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.sidebar-nav { display: flex; flex-direction: column; padding: 10px 8px; gap: 2px; flex: 1; }
+.sidebar-footer { padding: 8px; border-top: 1px solid var(--border); }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.active { background: var(--surface-2); color: var(--accent); border-left-color: var(--accent); }
+.nav-icon { font-size: 14px; flex: none; }
+
+.sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 45; }
+
+.content { flex: 1; min-width: 0; max-width: 1100px; padding: 18px 20px calc(24px + var(--safe-bottom)); }
+
+@media (max-width: 880px) {
+  .hamburger { display: flex; align-items: center; justify-content: center; }
+  .sidebar { position: fixed; z-index: 50; left: 0; top: 0; transform: translateX(-100%); transition: transform 0.2s ease; }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-overlay.open { display: block; }
+  .content { padding: calc(56px + var(--safe-top)) 14px calc(20px + var(--safe-bottom)); }
+}
+
+/* ---------- Primitivas de texto/página ---------- */
+.page-title { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+.page-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 14px; }
+.section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); font-weight: 700; margin: 20px 0 10px; }
+.pnl-pos { color: var(--green); }
+.pnl-neg { color: var(--red); }
+.empty-state { color: var(--text-dim); font-size: 12.5px; text-align: center; padding: 20px 10px; }
+
+/* ---------- Hero (Inicio) ---------- */
+.hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--green)); }
+.hero-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); font-weight: 700; }
+.hero-value { font-size: 30px; font-weight: 700; margin-top: 3px; letter-spacing: -0.4px; }
+.hero-sub { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 13px; font-weight: 600; flex-wrap: wrap; }
+
+/* ---------- Pills / badges ---------- */
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); white-space: nowrap; }
+.pill.live { color: var(--red); border-color: var(--red); }
+.pill.paper { color: var(--text-dim); }
+.pill.ok { color: var(--green); border-color: var(--green); }
+.pill.warn { color: var(--red); border-color: var(--red); }
+.pill.info { color: var(--accent); border-color: var(--accent); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); display: inline-block; }
+.dot.ok { background: var(--green); }
+.dot.bad { background: var(--red); }
+
+/* ---------- Stat row: grilla con techo de ancho por celda (auto-fit +
+   minmax), nunca se estira a celdas gigantes en pantallas anchas. ---------- */
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; }
+.stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); font-weight: 700; }
+.stat-value { font-size: 17px; font-weight: 700; margin-top: 3px; }
+.stat-note { font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
+
+/* ---------- Cards / panels ---------- */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 14px; }
+.card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 12.5px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+.kv:last-child { border-bottom: none; }
+.kv .label { color: var(--text-dim); }
+.kv .value { font-weight: 700; text-align: right; }
+
+/* ---------- Chart card ---------- */
+.chart-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px; }
+.period-group { display: flex; gap: 4px; }
+.period-btn { min-height: 30px; padding: 0 10px; background: transparent; color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.period-btn.active { background: var(--accent); color: #0a0a0f; border-color: var(--accent); }
+.chart-el { width: 100%; height: 200px; }
+.chart-placeholder { height: 200px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 12.5px; text-align: center; padding: 0 10px; }
+
+/* ---------- Botones / inputs (Settings) ---------- */
+.btn { min-height: 36px; padding: 0 16px; background: var(--surface-2); border: 1px solid var(--accent); border-radius: var(--radius-sm); color: var(--accent); font-size: 12.5px; font-weight: 700; cursor: pointer; margin-top: 6px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 10.5px; color: var(--text-dim); margin-bottom: 5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+.field input { width: 100%; max-width: 420px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); padding: 8px 10px; font-size: 12.5px; }
+
+/* ---------- Tablas ---------- */
+.table-wrap { overflow-x: auto; }
+table.data-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 380px; }
+table.data-table th { text-align: left; font-size: 10px; text-transform: uppercase; color: var(--text-dim); font-weight: 700; padding: 0 8px 6px; }
+table.data-table td { padding: 7px 8px; border-top: 1px solid var(--border); }
+
+/* ---------- Ícono real por cripto (fallback a emoji si no existe en el
+   set) ---------- */
 .pair-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; vertical-align: middle; }
 .pair-icon img { display: block; border-radius: 50%; }
-.pair-icon-fallback { align-items: center; justify-content: center; border-radius: 50%; background: var(--bs-tertiary-bg); font-size: 0.7em; }
+.pair-icon-fallback { align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-2); font-size: 0.7em; }
 
-/* ---------- Anillo de progreso (Accumulation Path) ---------- */
-.pair-card-ring .ring-text,
-[id$="-ring"] .ring-text { font-size: 13px; font-weight: 700; }
+/* ---------- Accumulation Path: grilla de tarjetas por par ---------- */
+.pair-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 4px; }
+.pair-card { background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--pair-color, var(--green)); border-radius: var(--radius-md); padding: 14px; }
+.pair-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; gap: 8px; }
+.pair-card-name { font-weight: 700; font-size: 13.5px; display: flex; align-items: center; gap: 7px; }
+.ring-text { font-size: 12px; font-weight: 700; fill: var(--text); }
 
-/* ---------- Donut de distribución de capital — conic-gradient nativo, sin
-   librería extra para un solo gráfico circular. ---------- */
-.donut-chart { width: 120px; height: 120px; border-radius: 50%; flex: none; position: relative; }
-.donut-chart::after { content: ''; position: absolute; inset: 20px; background: var(--bs-card-bg, var(--bs-body-bg)); border-radius: 50%; }
-.donut-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+/* ---------- Donut de distribución de capital ---------- */
+.donut-wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.donut-chart { width: 96px; height: 96px; border-radius: 50%; flex: none; position: relative; }
+.donut-chart::after { content: ''; position: absolute; inset: 16px; background: var(--surface); border-radius: 50%; }
+.donut-legend { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 140px; }
+.donut-legend-row { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.donut-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.donut-label { flex: 1; color: var(--text-dim); }
+.donut-value { font-weight: 700; white-space: nowrap; }
 
-/* ---------- Calendario de ganancias (página Métricas), estilo mapa de calor
-   (2026-09-16, pedido explícito: "mantener el calendario pero con otro
-   estilo visual") — la intensidad del color de fondo depende de cuánto ganó
-   o perdió ese día relativo al mejor/peor día del mes (ver --heat en
-   renderMetCalendar de app.js), no solo un borde de color fijo como antes.
-   Bootstrap no tiene componente de calendario, se arma con CSS grid propio. */
-.metrics-calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 12px; }
-.mc-weekday { text-align: center; font-size: 10.5px; font-weight: 700; color: var(--bs-secondary-color); text-transform: uppercase; padding-bottom: 4px; }
+/* ---------- Comparativa (barras divergentes) ---------- */
+.comp-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.comp-pair { width: 62px; display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; flex: none; }
+.comp-bar-track { position: relative; flex: 1; height: 14px; background: var(--surface-2); border-radius: 4px; }
+.comp-bar-mid { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--border); }
+.comp-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.comp-value { width: 52px; text-align: right; font-size: 12px; font-weight: 700; flex: none; }
+
+/* ---------- Historial de Ciclos: <details>/<summary> nativo ---------- */
+.cycle-card { border: 1px solid var(--border); border-left: 3px solid var(--pair-color, var(--green)); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
+.cycle-card[open] { background: var(--surface-2); }
+.cycle-card summary { cursor: pointer; list-style: none; }
+.cycle-card summary::-webkit-details-marker { display: none; }
+.cycle-summary-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.cycle-summary-main { display: flex; flex-direction: column; gap: 2px; }
+.cycle-pair { font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.cycle-meta { font-size: 11px; color: var(--text-dim); }
+.cycle-outcome { font-weight: 700; font-size: 13px; white-space: nowrap; }
+.cycle-chevron { color: var(--text-dim); font-size: 10px; transition: transform 0.15s ease; }
+.cycle-card[open] .cycle-chevron { transform: rotate(90deg); }
+.cycle-body { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+@keyframes row-fade-in { from { opacity: 0; background: rgba(240, 185, 11, 0.16); } to { opacity: 1; background: transparent; } }
+.cycle-card.cycle-new { animation: row-fade-in 1.2s ease-out; }
+
+/* ---------- Actividad reciente (Inicio) ---------- */
+.activity-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.activity-row:last-child { border-bottom: none; }
+.activity-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Racha ---------- */
+.racha-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.racha-value { font-size: 19px; font-weight: 700; margin-top: 2px; }
+
+/* ---------- "Qué está pensando el bot" ---------- */
+.thought-block { padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+.thought-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.thought-pair { font-weight: 700; font-size: 12.5px; margin-bottom: 3px; }
+.thought-quote { font-size: 12.5px; font-style: italic; margin-bottom: 3px; }
+
+/* ---------- Salud del sistema (Settings) ---------- */
+.health-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+
+/* ---------- Calendario de ganancias (Métricas), estilo mapa de calor ----------
+   El fix real acá: .metrics-calendar-wrap tiene un ANCHO TOPE (no ocupa la
+   tarjeta entera) y se centra — así cada celda queda ~50-58px sin importar
+   qué tan ancha sea la pantalla, en vez de estirarse a ocupar todo el
+   espacio disponible (eso era lo "tosco"/gigante de antes). */
+.metrics-calendar-wrap { max-width: 380px; margin: 0 auto; }
+.metrics-calendar-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-top: 10px; }
+.mc-weekday { text-align: center; font-size: 9.5px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; padding-bottom: 2px; }
 .metrics-calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .mc-day {
   aspect-ratio: 1 / 1;
-  border: 1px solid var(--bs-border-color);
-  border-radius: 10px;
-  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 1px;
   cursor: pointer;
   background: var(--mc-heat-bg, transparent);
   transition: border-color 0.15s ease, transform 0.1s ease;
 }
-.mc-day:hover { border-color: var(--bs-primary); transform: translateY(-1px); }
+.mc-day:hover { border-color: var(--accent); transform: translateY(-1px); }
 .mc-day.empty { border: none; cursor: default; }
-.mc-day.selected { border: 2px solid var(--bs-primary); padding: 5px 3px; }
-.mc-day-num { font-size: 11px; color: var(--bs-secondary-color); font-weight: 700; }
-.mc-day.pos .mc-day-num, .mc-day.neg .mc-day-num { color: var(--bs-emphasis-color); }
-.mc-day-pnl { font-size: 10px; font-weight: 700; line-height: 1.2; text-align: center; }
-.mc-day.pos .mc-day-pnl { color: #4ade80; }
-.mc-day.neg .mc-day-pnl { color: #f87171; }
+.mc-day.selected { border: 2px solid var(--accent); }
+.mc-day-num { font-size: 9.5px; color: var(--text-dim); font-weight: 700; }
+.mc-day.pos .mc-day-num, .mc-day.neg .mc-day-num { color: var(--text); }
+.mc-day-pnl { font-size: 8.5px; font-weight: 700; line-height: 1.1; text-align: center; }
+.mc-day.pos .mc-day-pnl { color: var(--green); }
+.mc-day.neg .mc-day-pnl { color: var(--red); }
 
-/* ---------- Animación de fila/tarjeta nueva (polling silencioso: Historial
-   de Ciclos). ---------- */
-@keyframes row-fade-in { from { opacity: 0; background: rgba(var(--bs-warning-rgb), 0.18); } to { opacity: 1; background: transparent; } }
-.accordion-item.cycle-new { animation: row-fade-in 1.2s ease-out; }
+/* ---------- Grid responsivo genérico (2 columnas en pantallas medianas+) ---------- */
+.two-col { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 760px) {
+  .two-col { grid-template-columns: 1fr 1fr; align-items: start; }
+  .stat-row { grid-template-columns: repeat(3, 1fr); }
+}

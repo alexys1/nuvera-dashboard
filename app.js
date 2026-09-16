@@ -288,24 +288,62 @@ async function refreshInicio() {
 
 // =========================================================================
 // PÁGINA: POSICIONES — saldo real Binance, qué piensa el bot, accumulation
-// path (BTC/ETH/BNB) y config de la estrategia.
+// path (una tarjeta por par, con anillo de progreso) y config de estrategia.
 // =========================================================================
-function accumulationPairBlockSkeleton(label, idPrefix) {
+// PAIR_COLORS/PAIR_EMOJI: acento visual por cripto — cualquier par que no
+// esté en el mapa (p.ej. un par nuevo activado con /activar por Telegram)
+// cae al fallback (verde / ●), nunca rompe el render.
+const PAIR_COLORS = { BTC: '#f7931a', ETH: '#8a92b2', BNB: '#f0b90b', SOL: '#14f195' };
+const PAIR_EMOJI = { BTC: '₿', ETH: 'Ξ', BNB: '🔶', SOL: '◎' };
+function pairColor(pair) { return PAIR_COLORS[pair.split('/')[0]] || 'var(--green)'; }
+function pairEmoji(pair) { return PAIR_EMOJI[pair.split('/')[0]] || '●'; }
+function pairIdPrefix(pair) { return `dca-${pair.split('/')[0].toLowerCase()}`; }
+
+// progressRingSvg/updateProgressRing: anillo circular de "compras/maxCompras"
+// — se dibuja una vez con 0% (el skeleton no depende de datos) y cada
+// refresh solo mueve stroke-dashoffset + el texto del centro, mismo criterio
+// "solo tocar lo que cambió" que el resto del dashboard.
+function progressRingSvg(color, size = 56) {
+  const stroke = 5;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
   return `
-    <div class="pair-block">
-      <div class="pair-block-title">${esc(label)} <span class="stat-sub" id="${idPrefix}-ciclo">—</span></div>
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--border)" stroke-width="${stroke}"/>
+      <circle class="ring-fill" data-circumference="${c.toFixed(2)}" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${c.toFixed(2)}" stroke-linecap="round" transform="rotate(-90 ${size / 2} ${size / 2})"/>
+      <text class="ring-text" x="50%" y="50%" text-anchor="middle" dy="0.35em">0%</text>
+    </svg>`;
+}
+function updateProgressRing(idPrefix, pct) {
+  const ring = $(`${idPrefix}-ring`);
+  if (!ring) return;
+  const circle = ring.querySelector('.ring-fill');
+  const c = parseFloat(circle.dataset.circumference);
+  const clamped = Math.min(100, Math.max(0, pct));
+  circle.setAttribute('stroke-dashoffset', (c * (1 - clamped / 100)).toFixed(2));
+  ring.querySelector('.ring-text').textContent = `${pct}%`;
+}
+
+function accumulationPairBlockSkeleton(pair, idPrefix) {
+  const color = pairColor(pair);
+  return `
+    <div class="pair-card" style="--pair-color:${color}">
+      <div class="pair-card-top">
+        <div class="pair-card-name">${pairEmoji(pair)} ${esc(pair.split('/')[0])}</div>
+        <div class="pair-card-ring" id="${idPrefix}-ring">${progressRingSvg(color)}</div>
+      </div>
+      <div class="stat-sub" id="${idPrefix}-ciclo" style="margin-bottom:10px;">—</div>
       <div class="kv-row"><span class="label">Avg Entry</span><span class="value" id="${idPrefix}-avg-entry">—</span></div>
       <div class="kv-row"><span class="label">Precio actual</span><span class="value" id="${idPrefix}-precio-actual">—</span></div>
-      <div class="kv-row"><span class="label">Capital invertido</span><span class="value" id="${idPrefix}-capital-invertido">—</span></div>
+      <div class="kv-row"><span class="label">Invertido</span><span class="value" id="${idPrefix}-capital-invertido">—</span></div>
       <div id="${idPrefix}-tp-block"></div>
-      <div class="ladder"><div class="ladder-step"><div class="ladder-bar"><div class="ladder-fill" id="${idPrefix}-progress-fill" style="width:0%"></div></div><span class="stat-sub" id="${idPrefix}-progress-pct">0%</span></div></div>
       <div id="${idPrefix}-trigger-block"></div>
     </div>`;
 }
-function pairIdPrefix(pair) { return `dca-${pair.split('/')[0].toLowerCase()}`; }
 function updateAccumulationPairBlock(idPrefix, p) {
   if (!p) return;
   const progressPct = p.maxCompras > 0 ? Math.round((p.compras / p.maxCompras) * 100) : 0;
+  updateProgressRing(idPrefix, progressPct);
   $(`${idPrefix}-ciclo`).textContent = `${p.compras}/${p.maxCompras} compras`;
   $(`${idPrefix}-avg-entry`).textContent = p.avgEntry !== null ? fmtUsdPrecise(p.avgEntry) : '—';
   $(`${idPrefix}-precio-actual`).textContent = p.currentPrice !== null ? fmtUsdPrecise(p.currentPrice) : '—';
@@ -317,26 +355,27 @@ function updateAccumulationPairBlock(idPrefix, p) {
     <div class="kv-row"><span class="label">🎯 TP actual</span><span class="value">${p.tpPct}%</span></div>
     <div class="kv-row"><span class="label">💰 Vende en</span><span class="value">${fmtUsdPrecise(p.precioVenta)}</span></div>
     <div class="kv-row"><span class="label">📈 Falta subir</span><span class="value pnl-pos">${fmtUsd(p.faltaSubir)} (+${p.faltaPct}%)</span></div>
-    <div class="tp-divider"></div>
   ` : '';
-  $(`${idPrefix}-progress-fill`).style.width = `${progressPct}%`;
-  $(`${idPrefix}-progress-pct`).textContent = `${progressPct}%`;
   // triggerNote: server.js solo lo manda cuando el ciclo sigue acumulando
   // pero dynamicDropPctForPair no pudo leer el ATR real (cayó al fallback
   // estático) — en ese caso NO llega nextTriggerPrice, se muestra este aviso
   // en vez del mensaje genérico de "esperando caída".
   $(`${idPrefix}-trigger-block`).innerHTML = p.nextTriggerPrice !== null ? `
-    <div class="kv-row" style="margin-top:8px;"><span class="label">Próximo trigger</span><span class="value">${fmtUsdPrecise(p.nextTriggerPrice)}</span></div>
+    <div class="tp-divider"></div>
+    <div class="kv-row"><span class="label">Próximo trigger</span><span class="value">${fmtUsdPrecise(p.nextTriggerPrice)}</span></div>
     <div class="kv-row"><span class="label">Drop necesario</span><span class="value pnl-neg">-${p.dropRequiredPct}%</span></div>
-  ` : `<div class="stat-sub" style="margin-top:8px;">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`;
+  ` : `<div class="tp-divider"></div><div class="stat-sub">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`;
 }
 let poPairKeys = null; // set de pares (string) ya renderizado — null fuerza reconstruir
 function renderAccumulationPathIncremental(pares) {
   const pairEntries = Object.entries(pares);
   const keys = pairEntries.map(([pair]) => pair).sort().join('|');
   if (keys !== poPairKeys) {
+    // Cambió el set de pares (p.ej. se activó uno nuevo con /activar por
+    // Telegram) — se reconstruyen las tarjetas. En el uso normal (mismos 3
+    // pares en cada refresh) esto no corre, solo updateAccumulationPairBlock.
     poPairKeys = keys;
-    $('poPairBlocks').innerHTML = pairEntries.map(([pair]) => accumulationPairBlockSkeleton(pair.split('/')[0], pairIdPrefix(pair))).join('');
+    $('poPairBlocks').innerHTML = pairEntries.map(([pair]) => accumulationPairBlockSkeleton(pair, pairIdPrefix(pair))).join('');
   }
   pairEntries.forEach(([pair, p]) => updateAccumulationPairBlock(pairIdPrefix(pair), p));
 }
@@ -418,21 +457,20 @@ function posicionesSkeleton() {
   return `
     <div class="page-header">
       <div class="ph-title">POSICIONES — BOT 4</div>
-      <div class="ph-value" style="font-size:20px;" id="poInvestedFree">—</div>
+    </div>
+    <div class="stat-row">
+      <div class="stat-box"><div class="stat-label">Capital Total</div><div class="stat-value" id="poCapitalTotal">—</div></div>
+      <div class="stat-box"><div class="stat-label">Invertido</div><div class="stat-value" id="poInvertido">—</div></div>
+      <div class="stat-box"><div class="stat-label">Libre</div><div class="stat-value" id="poLibre">—</div></div>
     </div>
     <div id="poErrorBanner"></div>
     <div id="poRealBalancePanel"></div>
     <div id="poThoughtsPanel"></div>
     <div class="section-title">Accumulation Path</div>
-    <div class="two-col">
-      <div id="poPairBlocks"></div>
-      <div>
-        <div class="panel">
-          <div class="panel-title">Strategy Config</div>
-          <div id="poConfigPanel"><div class="empty-state skeleton">Cargando…</div></div>
-        </div>
-      </div>
-    </div>
+    <div class="pair-grid" id="poPairBlocks"><div class="empty-state skeleton">Cargando…</div></div>
+    <div class="section-title">Configuración de la estrategia</div>
+    <div class="stat-row" id="poConfigStats"><div class="empty-state skeleton">Cargando…</div></div>
+    <div class="stat-sub" id="poDropLabel" style="margin-top:10px;"></div>
   `;
 }
 function renderPosicionesSkeleton() {
@@ -449,17 +487,23 @@ async function refreshPosiciones() {
       fetchJson('/api/bot/4/thoughts').catch(() => null),
       fetchJson(`/api/bot/dca/${id}/path`),
     ]);
-    $('poInvestedFree').textContent = investedFreeHtml(bot.capitalInvertido, bot.capitalLibre);
+    $('poCapitalTotal').textContent = fmtUsd(bot.capitalActual);
+    $('poInvertido').textContent = fmtUsd(bot.capitalInvertido);
+    $('poLibre').textContent = fmtUsd(bot.capitalLibre);
 
-    // Saldo REAL de Binance — BTC/ETH/BNB (2026-09-16, fix: faltaba BNB, el
-    // tercer par de Bot 4 desde el 2026-08-27, aunque la API ya lo traía).
+    // Saldo REAL de Binance (2026-09-16, fix: el panel tenía BTC/ETH/BNB
+    // hardcodeados a mano — cualquier par nuevo activado con /activar por
+    // Telegram no aparecía acá aunque la API ya lo trajera dinámico, ver
+    // fetchBot4BalanceReal en server.js). Ahora itera real.posiciones tal
+    // cual venga, sin asumir cuáles/cuántos pares hay.
+    const posicionesHtml = (real && real.live)
+      ? Object.entries(real.posiciones).map(([sym, p]) => `<div class="kv-row"><span class="label">${pairEmoji(`${sym}/USDT`)} ${esc(sym)}</span><span class="value">${p.cantidad.toFixed(6)} (${fmtUsd(p.valorUsd)})</span></div>`).join('')
+      : '';
     $('poRealBalancePanel').innerHTML = (real && real.live) ? `
       <div class="panel" style="border:1px solid #ff3b3b55;">
         <div class="panel-title">💰 Saldo real en Binance <span class="pill mode-live">🔴 LIVE</span></div>
         <div class="kv-row"><span class="label">USDT disponible</span><span class="value">${fmtUsd(real.usdtDisponible)}</span></div>
-        <div class="kv-row"><span class="label">BTC</span><span class="value">${real.posiciones.BTC.cantidad.toFixed(6)} (${fmtUsd(real.posiciones.BTC.valorUsd)})</span></div>
-        <div class="kv-row"><span class="label">ETH</span><span class="value">${real.posiciones.ETH.cantidad.toFixed(6)} (${fmtUsd(real.posiciones.ETH.valorUsd)})</span></div>
-        <div class="kv-row"><span class="label">BNB</span><span class="value">${real.posiciones.BNB.cantidad.toFixed(6)} (${fmtUsd(real.posiciones.BNB.valorUsd)})</span></div>
+        ${posicionesHtml}
         <div class="kv-row"><span class="label">Capital total real</span><span class="value">${fmtUsd(real.capitalRealTotal)}</span></div>
       </div>` : '';
 
@@ -467,11 +511,11 @@ async function refreshPosiciones() {
 
     renderAccumulationPathIncremental(path.pares);
 
-    $('poConfigPanel').innerHTML = `
-      <div class="kv-row"><span class="label">Orden por compra</span><span class="value">${path.config.baseOrderUsd !== null ? fmtUsd(path.config.baseOrderUsd) : 'variable (IA)'}</span></div>
-      <div class="kv-row"><span class="label">Drop trigger</span><span class="value">${esc(path.config.dropPctLabel)}</span></div>
-      <div class="kv-row"><span class="label">Take Profit</span><span class="value">${path.config.tpMinPct}% – ${path.config.tpMaxPct}%</span></div>
-      <div class="kv-row"><span class="label">Máx. compras</span><span class="value">${path.config.maxCompras}</span></div>`;
+    $('poConfigStats').innerHTML = `
+      <div class="stat-box"><div class="stat-label">Orden por compra</div><div class="stat-value">${path.config.baseOrderUsd !== null ? fmtUsd(path.config.baseOrderUsd) : 'variable'}</div></div>
+      <div class="stat-box"><div class="stat-label">Take Profit</div><div class="stat-value">${path.config.tpMinPct}% – ${path.config.tpMaxPct}%</div></div>
+      <div class="stat-box"><div class="stat-label">Máx. compras</div><div class="stat-value">${path.config.maxCompras}</div></div>`;
+    $('poDropLabel').textContent = `Drop trigger: ${path.config.dropPctLabel}`;
     $('poErrorBanner').innerHTML = '';
   } catch (err) {
     $('poErrorBanner').innerHTML = '<div class="empty-state">No se pudo cargar la información de posiciones.</div>';
@@ -493,11 +537,11 @@ function cycleCardHtml(c, extraClass = '') {
       <td class="${pnlClass(b.pnl)}">${fmtUsd(b.pnl)}</td>
     </tr>`).join('');
   return `
-    <details class="${cardClass}">
+    <details class="${cardClass}" style="--pair-color:${pairColor(c.par)}">
       <summary>
         <div class="cycle-summary-row">
           <div class="cycle-summary-main">
-            <span class="cycle-pair">${esc(c.par)}</span>
+            <span class="cycle-pair">${pairEmoji(c.par)} ${esc(c.par)}</span>
             <span class="cycle-time-row">Inicio: ${formatTimePeruCompact(c.inicioTs)}</span>
             <span class="cycle-time-row">Fin: ${formatTimePeruCompact(c.cierreTs)}</span>
             <span class="cycle-meta">(${esc(c.duracion)}) · ${c.numCompras} compras · ${fmtUsd(c.totalInvertido)} invertido</span>
@@ -547,6 +591,11 @@ function historialSkeleton() {
       <div class="ph-title">HISTORIAL DE CICLOS — BOT 4</div>
       <div class="stat-sub" style="margin-top:6px;">Cada tarjeta es un ciclo completo: todas las compras DCA de un par, cerradas juntas en la misma venta.</div>
     </div>
+    <div class="stat-row">
+      <div class="stat-box"><div class="stat-label">Ciclos cerrados</div><div class="stat-value" id="hiTotalCiclos">—</div></div>
+      <div class="stat-box"><div class="stat-label">Win Rate</div><div class="stat-value" id="hiWinRate">—</div></div>
+      <div class="stat-box"><div class="stat-label">PnL total</div><div class="stat-value" id="hiPnlTotal">—</div></div>
+    </div>
     <div id="hiErrorBanner"></div>
     <div class="table-wrap" id="dcaHistory"><div class="empty-state skeleton">Cargando…</div></div>
   `;
@@ -555,9 +604,20 @@ function renderHistorialSkeleton() {
   $('content').innerHTML = historialSkeleton();
   dcaKnownCycleKeys = null;
 }
+function renderHistorialSummary(cycles) {
+  const total = cycles.length;
+  const wins = cycles.filter((c) => c.outcome === 'win').length;
+  const winRate = total > 0 ? Math.round((wins / total) * 100) : 0;
+  const pnlTotal = cycles.reduce((s, c) => s + c.pnlTotal, 0);
+  $('hiTotalCiclos').textContent = total;
+  $('hiWinRate').textContent = `${winRate}%`;
+  $('hiPnlTotal').textContent = fmtUsd(pnlTotal);
+  $('hiPnlTotal').className = `stat-value ${pnlClass(pnlTotal)}`;
+}
 async function refreshHistorial() {
   try {
     const cycles = await fetchJson('/api/bot/4/cycles');
+    renderHistorialSummary(cycles || []);
     renderDcaCyclesIncremental(cycles || []);
     $('hiErrorBanner').innerHTML = '';
   } catch (err) {

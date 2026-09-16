@@ -236,20 +236,29 @@ table.data-table td { padding: 9px 10px; border-top: 1px solid var(--border); }
 .kv-row .label { color: var(--text-sec); }
 .kv-row .value { font-weight: 700; }
 
-.two-col { display: grid; grid-template-columns: 1fr; gap: 14px; }
-
 .empty-state { color: var(--text-sec); font-size: 13px; text-align: center; padding: 28px 12px; }
 .skeleton { opacity: 0.7; }
 
-/* ---------- Accumulation path (Motor A / Bot 3 / Bot 4) ---------- */
-.pair-block { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
-.pair-block-title { font-weight: 700; font-size: 14px; margin-bottom: 8px; display:flex; align-items:center; gap:8px; }
+/* ---------- Accumulation path — grilla de tarjetas por par (2026-09-16,
+   rediseño: antes era una sola columna de bloques con barra lineal; ahora
+   cada par es una tarjeta con acento de color propio (--pair-color, ver
+   PAIR_COLORS en app.js — cualquier par nuevo activado por Telegram cae a
+   un fallback verde, nunca queda sin color) y un anillo de progreso en vez
+   de barra, para poder comparar varios pares de un vistazo. ---------- */
+.pair-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 4px; }
+.pair-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--pair-color, var(--green));
+  border-radius: 12px;
+  padding: 16px;
+}
+.pair-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; gap: 10px; }
+.pair-card-name { font-weight: 700; font-size: 15px; }
+.pair-card-ring { flex: none; }
+.pair-card-ring .ring-text { font-size: 13px; font-weight: 700; fill: var(--text); }
 /* Separador del bloque "TP actual / Vende en / Falta subir" (2026-08-23) */
 .tp-divider { border-top: 1px dashed var(--border); margin: 8px 0; }
-.ladder { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
-.ladder-step { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
-.ladder-bar { height: 6px; border-radius: 3px; background: var(--active-bg); flex: 1; overflow: hidden; }
-.ladder-fill { height: 100%; background: var(--yellow); }
 
 /* ---------- Historial de Ciclos (Bot 4, 2026-08-24, pedido explícito:
    "reemplazar DCA Execution History con vista de ciclos") — <details>/
@@ -257,7 +266,7 @@ table.data-table td { padding: 9px 10px; border-top: 1px solid var(--border); }
    refresh incremental (solo prepend de tarjetas nuevas, ver
    renderDcaCyclesIncremental) no pierde el estado expandido de las
    existentes. ---------- */
-.cycle-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.cycle-card { border: 1px solid var(--border); border-left: 3px solid var(--pair-color, var(--green)); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
 .cycle-card[open] { background: var(--active-bg); }
 .cycle-card summary { cursor: pointer; list-style: none; }
 .cycle-card summary::-webkit-details-marker { display: none; }
@@ -356,7 +365,10 @@ table.cycle-buys-table th, table.cycle-buys-table td { padding: 6px 8px; font-si
 
 /* ---------- Desktop (>=900px) ---------- */
 @media (min-width: 900px) {
-  .two-col { grid-template-columns: 1.3fr 1fr; align-items: start; }
   .stat-row { grid-template-columns: repeat(3, 1fr); }
   .metrics-top-grid { grid-template-columns: 1fr 1fr; }
+  .pair-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 1180px) {
+  .pair-grid { grid-template-columns: repeat(3, 1fr); }
 }

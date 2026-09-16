@@ -617,13 +617,30 @@ async function refreshPosiciones() {
       fetchJson('/api/bot/4/thoughts').catch(() => null),
       fetchJson(`/api/bot/dca/${id}/path`),
     ]);
-    $('poCapitalTotal').textContent = fmtUsd(bot.capitalActual);
-    $('poInvertido').textContent = fmtUsd(bot.capitalInvertido);
-    $('poLibre').textContent = fmtUsd(bot.capitalLibre);
+    // Capital Total/Invertido/Libre (2026-09-17, pedido explícito — el
+    // usuario comparó contra Binance y no coincidía): antes estos 3 stat
+    // boxes salían de bot.capitalActual/capitalInvertido/capitalLibre, que es
+    // contabilidad interna (capital_actual solo se toca en trade_close/
+    // reconciliación — ver persistCapital en competitionDcaMotorA.js — e
+    // "invertido" es costo de entrada, no valor de mercado actual). Eso
+    // diverge de Binance apenas el precio se mueve desde la entrada. Cuando
+    // hay saldo real (live), se usa ESE (mismo dato que el panel "Saldo real
+    // en Binance" de abajo) para que coincida con lo que el usuario ve en su
+    // cuenta. Fallback a bot.* solo si falló el fetch a Binance (real===null).
+    const realInvertido = (real && real.live)
+      ? Object.values(real.posiciones).reduce((s, p) => s + p.valorUsd, 0)
+      : null;
+    const capitalTotalShown = (real && real.live) ? real.capitalRealTotal : bot.capitalActual;
+    const invertidoShown = (real && real.live) ? realInvertido : bot.capitalInvertido;
+    const libreShown = (real && real.live) ? real.usdtDisponible : bot.capitalLibre;
+
+    $('poCapitalTotal').textContent = fmtUsd(capitalTotalShown);
+    $('poInvertido').textContent = fmtUsd(invertidoShown);
+    $('poLibre').textContent = fmtUsd(libreShown);
 
     const donutEntries = [
       ...Object.entries(path.pares).map(([pair, p]) => ({ label: pair.split('/')[0], value: p.totalInvested, color: pairColor(pair) })),
-      { label: 'Libre', value: bot.capitalLibre, color: '#8b8fa3' },
+      { label: 'Libre', value: libreShown, color: '#8b8fa3' },
     ];
     $('poDonutPanel').innerHTML = donutChartHtml(donutEntries);
     $('poComparativaPanel').innerHTML = comparativaHtml(path.pares);

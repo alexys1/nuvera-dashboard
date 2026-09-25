@@ -633,6 +633,14 @@ async function refreshPosiciones() {
     const capitalTotalShown = (real && real.live) ? real.capitalRealTotal : bot.capitalActual;
     const invertidoShown = (real && real.live) ? realInvertido : bot.capitalInvertido;
     const libreShown = (real && real.live) ? real.usdtDisponible : bot.capitalLibre;
+    // earnShown (2026-09-25, pedido explícito, "que la web muestre cuánto
+    // está en el Earn"): 0 mientras el bot no lo tenga prendido (earnEnabled
+    // en false) — real.earnUsdt en ese caso siempre es 0 desde el backend
+    // (ver fetchBot4BalanceReal en server.js), así que no hace falta chequear
+    // earnEnabled dos veces acá, pero sí para decidir si se MUESTRA la
+    // tarjeta/slice (un $0 real y un "no lo estamos contando" son cosas
+    // distintas de comunicar).
+    const earnShown = (real && real.live && real.earnEnabled) ? real.earnUsdt : 0;
 
     $('poCapitalTotal').textContent = fmtUsd(capitalTotalShown);
     $('poInvertido').textContent = fmtUsd(invertidoShown);
@@ -641,6 +649,7 @@ async function refreshPosiciones() {
     const donutEntries = [
       ...Object.entries(path.pares).map(([pair, p]) => ({ label: pair.split('/')[0], value: p.totalInvested, color: pairColor(pair) })),
       { label: 'Libre', value: libreShown, color: '#8b8fa3' },
+      ...(earnShown > 0 ? [{ label: 'Earn', value: earnShown, color: '#f0b429' }] : []),
     ];
     $('poDonutPanel').innerHTML = donutChartHtml(donutEntries);
     $('poComparativaPanel').innerHTML = comparativaHtml(path.pares);
@@ -651,9 +660,14 @@ async function refreshPosiciones() {
     const posicionesHtml = (real && real.live)
       ? Object.entries(real.posiciones).map(([sym, p]) => kv(`${pairIconHtml(`${sym}/USDT`, 16)} ${esc(sym)}`, `${p.cantidad.toFixed(6)} (${fmtUsd(p.valorUsd)})`)).join('')
       : '';
+    // earnRowHtml (2026-09-25, pedido explícito): solo se muestra si el bot
+    // tiene EARN_ENABLED prendido — ver comentario de earnShown arriba.
+    const earnRowHtml = (real && real.live && real.earnEnabled)
+      ? kv('💤 En Binance Earn (Flexible)', fmtUsd(real.earnUsdt))
+      : '';
     $('poRealBalancePanel').innerHTML = (real && real.live) ? cardHtml(
       `💰 Saldo real en Binance ${modePillHtml('live')}`,
-      kv('USDT disponible', fmtUsd(real.usdtDisponible)) + posicionesHtml + kv('Capital total real', fmtUsd(real.capitalRealTotal)),
+      kv('USDT disponible (Spot)', fmtUsd(real.usdtDisponible)) + earnRowHtml + posicionesHtml + kv('Capital total real', fmtUsd(real.capitalRealTotal)),
     ) : '';
 
     $('poThoughtsPanel').innerHTML = thoughts ? renderThoughtsPanel(thoughts) : '';
@@ -857,10 +871,14 @@ function renderMetCalendar() {
   const primerDiaSemana = (new Date(Date.UTC(metCalYear, metCalMonth, 1)).getUTCDay() + 6) % 7;
   const diasEnMes = new Date(Date.UTC(metCalYear, metCalMonth + 1, 0)).getUTCDate();
 
-  // Mapa de calor: intensidad de fondo proporcional al |pnl| del día
-  // relativo al mayor |pnl| del mes — un día que ganó/perdió poco casi no
+  // Mapa de calor: intensidad de fondo proporcional al |pnlNeto| del día
+  // relativo al mayor |pnlNeto| del mes — un día que ganó/perdió poco casi no
   // se nota, el mejor/peor día del mes se ve bien saturado.
-  const maxAbsPnl = Math.max(1, ...Object.values(metDailyMap).map((r) => Math.abs(r.pnl)));
+  // pnlNeto, no pnl/pnlBruto (2026-09-19, pedido explícito — pnl solo
+  // descuenta el fee ESTIMADO de compra, no el fee REAL de venta que ya
+  // viene calculado en pnlNeto; mostrar el bruto en el calendario inflaba
+  // la ganancia de cada día).
+  const maxAbsPnl = Math.max(1, ...Object.values(metDailyMap).map((r) => Math.abs(r.pnlNeto)));
   let html = '';
   for (let i = 0; i < primerDiaSemana; i++) html += '<div class="mc-day empty"></div>';
   for (let dia = 1; dia <= diasEnMes; dia++) {
@@ -869,15 +887,15 @@ function renderMetCalendar() {
     const clases = ['mc-day'];
     let heatStyle = '';
     if (row) {
-      clases.push(row.pnl >= 0 ? 'pos' : 'neg');
-      const intensidad = 0.12 + (Math.abs(row.pnl) / maxAbsPnl) * 0.55;
-      const rgb = row.pnl >= 0 ? '22,199,132' : '234,57,67';
+      clases.push(row.pnlNeto >= 0 ? 'pos' : 'neg');
+      const intensidad = 0.12 + (Math.abs(row.pnlNeto) / maxAbsPnl) * 0.55;
+      const rgb = row.pnlNeto >= 0 ? '22,199,132' : '234,57,67';
       heatStyle = ` style="--mc-heat-bg: rgba(${rgb}, ${intensidad.toFixed(2)});"`;
     }
     if (fecha === metSelectedFecha) clases.push('selected');
     html += `<div class="${clases.join(' ')}" data-fecha="${fecha}"${heatStyle}>
       <span class="mc-day-num">${dia}</span>
-      ${row ? `<span class="mc-day-pnl">${row.pnl >= 0 ? '+' : ''}${fmtUsd(row.pnl)}</span>` : ''}
+      ${row ? `<span class="mc-day-pnl">${row.pnlNeto >= 0 ? '+' : ''}${fmtUsd(row.pnlNeto)}</span>` : ''}
     </div>`;
   }
   $('metCalendarGrid').innerHTML = html;
@@ -911,8 +929,9 @@ function loadMetBarChart(dailyData) {
   }
   $('metBarChartContainer').style.display = 'block';
   $('metBarChartPlaceholder').style.display = 'none';
+  // pnlNeto, no pnl/pnlBruto — mismo criterio que renderMetCalendar() arriba.
   const points = dailyData
-    .map((d) => ({ time: Math.floor(new Date(`${d.fecha}T00:00:00Z`).getTime() / 1000), value: d.pnl, color: d.pnl >= 0 ? '#16c784' : '#ea3943' }))
+    .map((d) => ({ time: Math.floor(new Date(`${d.fecha}T00:00:00Z`).getTime() / 1000), value: d.pnlNeto, color: d.pnlNeto >= 0 ? '#16c784' : '#ea3943' }))
     .sort((a, b) => a.time - b.time);
   const { chart, series } = ensureHistogramChart('metBarChartContainer');
   series.setData(points);

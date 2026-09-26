@@ -9,7 +9,7 @@
 // frameworks, sin build step (se sirve tal cual desde GitHub Pages).
 
 // ---------- Config / API base ----------
-const DEFAULT_API_BASE = 'https://basketball-date-introducing-est.trycloudflare.com';
+const DEFAULT_API_BASE = 'https://picks-whom-hoping-workout.trycloudflare.com';
 function resolveApiBase() {
   const url = new URL(window.location.href);
   const fromQuery = url.searchParams.get('api');

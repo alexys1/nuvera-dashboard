@@ -21,6 +21,31 @@ function resolveApiBase() {
 }
 let API_BASE = resolveApiBase();
 
+// El quick tunnel de Cloudflare cambia de URL en cada reinicio del servidor.
+// El servidor publica la URL vigente en api-url.json (ver
+// nuvera-trading-bot/scripts/publish-tunnel-url.sh), así que acá se prueba
+// en orden: la guardada/por defecto, y si no responde, la publicada. La web
+// se recupera sola, sin editar nada a mano.
+async function apiResponde(base) {
+  try {
+    const res = await fetch(`${base}/api/status`, { signal: AbortSignal.timeout(5000) });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+const apiReady = (async () => {
+  if (await apiResponde(API_BASE)) return;
+  try {
+    const res = await fetch(`api-url.json?t=${Date.now()}`, { cache: 'no-store' });
+    const { api } = await res.json();
+    if (api && api !== API_BASE && await apiResponde(api)) {
+      API_BASE = api;
+      try { localStorage.setItem('nuvera_api', api); } catch (e) { /* sin storage */ }
+    }
+  } catch (e) { /* sin api-url.json todavía */ }
+})();
+
 const $ = (id) => document.getElementById(id);
 const fmtUsd = (n) => (n === null || n === undefined ? '—' : `$${Number(n).toFixed(2)}`);
 const fmtUsdPrecise = (n, d = 2) => (n === null || n === undefined ? '—' : `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })}`);
@@ -76,6 +101,7 @@ async function fetchJson(path, { force = false } = {}) {
   const cached = cache.get(path);
   if (!force && cached && Date.now() - cached.fetchedAt < ttl) return cached.data;
 
+  await apiReady;
   const res = await fetch(`${API_BASE}${path}`);
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   const data = await res.json();

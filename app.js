@@ -1121,7 +1121,7 @@ async function refreshSettings() {
 function renderGridSkeleton() {
   $('content').innerHTML = `
     <div class="page-title">🔬 Bot Sombra + Grid</div>
-    <div class="stat-note" style="margin-bottom:10px;">Réplica ficticia de Bot 4 con las mismas compras y ventas reales. La cuenta 🅱️ además opera un grid lateral — comparás las dos para ver si el grid suma.</div>
+    <div class="stat-note" style="margin-bottom:10px;">Solo dos cosas: 🅰️ tu Bot 4 real (saldo de Binance) y 🅱️ la copia, que arranca con el mismo saldo, copia cada compra y venta real y además opera un grid lateral. Ves cuál tiene más saldo. La copia no opera con dinero real ni manda notificaciones.</div>
     <div id="gridSimBody"><div class="empty-state">Cargando…</div></div>`;
 }
 async function refreshGrid() {
@@ -1142,7 +1142,7 @@ async function refreshGrid() {
     const dias = s.historialDiario.length === 0
       ? '<div class="empty-state">El primer cierre diario aparece en unos minutos.</div>'
       : `<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;">
-          <tr style="color:var(--text-dim);text-align:right;"><th style="text-align:left;">Día</th><th>🅰️ Bot 4</th><th>🅱️ +Grid</th><th>Dif.</th><th>Grid día</th></tr>
+          <tr style="color:var(--text-dim);text-align:right;"><th style="text-align:left;">Día</th><th>🅰️ Real</th><th>🅱️ Copia</th><th>Dif.</th><th>Grid día</th></tr>
           ${s.historialDiario.map((d) => `<tr style="text-align:right;border-top:1px solid var(--border);">
             <td style="text-align:left;">${esc(d.dia)}</td><td>${fmtUsd(d.equityA)}</td><td>${fmtUsd(d.equityB)}</td>
             <td class="${pnlClass(d.diferencia)}">${money(d.diferencia)}</td>
@@ -1157,8 +1157,8 @@ async function refreshGrid() {
     body.innerHTML =
       cardHtml(`⚖️ Comparación · día ${s.dias}${s.gridActivo ? '' : ' · ⏸️ grid pausado'}`,
         kv('Capital inicial', fmtUsd(s.capitalInicial))
-        + kv('🅰️ Bot 4 solo (réplica)', `${fmtUsd(s.cuentaA.equity)} (${money(s.cuentaA.pnl)} · ${fmtPct(s.cuentaA.pnlPct, 2)})`, pnlClass(s.cuentaA.pnl))
-        + kv('🅱️ Bot 4 + grid', `${fmtUsd(s.cuentaB.equity)} (${money(s.cuentaB.pnl)} · ${fmtPct(s.cuentaB.pnlPct, 2)})`, pnlClass(s.cuentaB.pnl))
+        + kv('🅰️ Bot real', `${fmtUsd(s.cuentaA.equity)} (${money(s.cuentaA.pnl)} · ${fmtPct(s.cuentaA.pnlPct, 2)})`, pnlClass(s.cuentaA.pnl))
+        + kv('🅱️ Bot copia (+ grid)', `${fmtUsd(s.cuentaB.equity)} (${money(s.cuentaB.pnl)} · ${fmtPct(s.cuentaB.pnlPct, 2)})`, pnlClass(s.cuentaB.pnl))
         + kv('Diferencia (aporte del grid)', `${money(s.diferencia)} · ${fmtPct(s.diferenciaPct, 3)}`, pnlClass(s.diferencia))
         + kv('Veredicto', veredicto))
       + cardHtml('Diferencia 🅱️ − 🅰️ en el tiempo', '<div id="gridDiffChart" style="height:180px;"></div>')
@@ -1167,6 +1167,7 @@ async function refreshGrid() {
         kv('Rango', `${fmtUsdPrecise(s.precioMin)} - ${fmtUsdPrecise(s.precioMax)} (±${(s.rangoPct * 100).toFixed(1)}%)`)
         + kv('Precio actual', fmtUsdPrecise(s.precioActual))
         + kv('Niveles / usa del efectivo', `${s.niveles} / ${(s.gridPct * 100).toFixed(0)}%`)
+        + kv('Filtro de tendencia (SMA 30d)', s.tendencia.sma === null ? 'calculando…' : `${fmtUsdPrecise(s.tendencia.sma)} · ${s.tendencia.enEspera ? '⏸️ en espera (mercado cayendo)' : (s.tendencia.sobreSma ? '✅ operando' : '⏳ sin compras nuevas (bajo la SMA)')}`)
         + kv('Invertido en el grid', fmtUsd(s.gridInvertido))
         + kv('Ciclos DCA abiertos (iguales en A y B)', fmtUsd(s.dcaAbiertoCosto)))
       + cardHtml('HOY (grid)',

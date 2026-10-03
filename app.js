@@ -82,6 +82,7 @@ const CACHE_TTL_MS = {
   '/api/racha': CACHE_TTL_GENERAL,
   '/api/health': CACHE_TTL_GENERAL,
   '/api/grid-simulator/status': CACHE_TTL_CRITICAL,
+  '/api/grid-simulator/status': 4_000, // tiempo real: el bot actualiza cada 15 s
   '/api/grid-simulator/history': CACHE_TTL_CRITICAL,
   '/api/metrics/daily': CACHE_TTL_GENERAL,
   '/api/metrics/monthly': CACHE_TTL_GENERAL,
@@ -1114,16 +1115,47 @@ async function refreshSettings() {
 }
 
 // =========================================================================
-// PÁGINA: BOT SOMBRA + GRID (2026-10-03) — réplica ficticia de Bot 4 (mismas
-// compras/ventas/fees/depósitos, copiadas de la DB real) con un grid lateral,
-// para decidir si el grid vale la pena en el bot real. Nada de esto es dinero real.
+// PÁGINA: BOT COPIA + GRID (2026-10-03) — copia ficticia de Bot 4: mismo saldo
+// de partida, mismas compras/ventas/fees/depósitos (leídos de la DB real),
+// pero con un grid lateral extra. Se compara contra el saldo real para ver
+// si el grid conviene. Nada de esto mueve dinero real ni manda notificaciones.
 // =========================================================================
+let gridLastHtml = '';
+let gridHowOpen = false;
 function renderGridSkeleton() {
+  gridLastHtml = '';
   $('content').innerHTML = `
-    <div class="page-title">🔬 Bot Sombra + Grid</div>
-    <div class="stat-note" style="margin-bottom:10px;">Solo dos cosas: 🅰️ tu Bot 4 real (saldo de Binance) y 🅱️ la copia, que arranca con el mismo saldo, copia cada compra y venta real y además opera un grid lateral. Ves cuál tiene más saldo. La copia no opera con dinero real ni manda notificaciones.</div>
+    <div class="page-title">🧪 Bot copia + Grid</div>
     <div id="gridSimBody"><div class="empty-state">Cargando…</div></div>`;
 }
+
+const gMoney = (n) => (n === null || n === undefined ? '—' : `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(2)}`);
+const gMoney3 = (n) => (n === null || n === undefined ? '—' : `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(3)}`);
+
+// Escalera: una fila por línea del grid, de arriba (venta) a abajo (compra),
+// con el precio actual marcado entre las líneas que corresponde.
+function gridLadderHtml(s) {
+  const base = s.par.split('/')[0];
+  const rows = [];
+  let priceDrawn = false;
+  const priceRow = `<div class="gl-row gl-price"><span>▶ ${base} ahora</span><span>${fmtUsdPrecise(s.precioActual)}</span></div>`;
+  s.escalera.forEach((l) => {
+    if (!priceDrawn && s.precioActual >= l.precio) { rows.push(priceRow); priceDrawn = true; }
+    let cls = 'gl-free'; let txt = 'sin compra (precio todavía arriba)';
+    if (l.tipo === 'comprada') { cls = 'gl-bought'; txt = `🟢 comprada a ${fmtUsdPrecise(l.entrada)} · $${l.monto.toFixed(0)} → la vende en ${fmtUsdPrecise(l.objetivo)}`; }
+    else if (l.tipo === 'compra_pendiente') { cls = 'gl-buy'; txt = '📥 compra pendiente: compra si el precio baja hasta aquí'; }
+    rows.push(`<div class="gl-row ${cls}"><span>${fmtUsdPrecise(l.precio)}</span><span>${txt}</span></div>`);
+  });
+  if (!priceDrawn) rows.push(priceRow);
+  return `<div class="gl">${rows.join('')}</div>
+    <div class="stat-note" style="margin-top:8px;">Cada línea es un escalón. El grid compra cuando el precio <b>baja</b> hasta un escalón y vende cuando <b>sube</b> al de arriba. Si el precio se sale del rango, cierra todo y arma una escalera nueva.</div>`;
+}
+
+function gridActivityHtml(items) {
+  if (!items.length) return '<div class="empty-state">Todavía no pasó nada.</div>';
+  return items.map((a) => `<div class="activity-row"><div class="activity-left"><span>${esc(a.texto)}</span></div><span class="stat-note" style="white-space:nowrap;">${relativeTimeEs(a.ts)}</span></div>`).join('');
+}
+
 async function refreshGrid() {
   const body = $('gridSimBody');
   if (!body) return;
@@ -1132,65 +1164,122 @@ async function refreshGrid() {
       fetchJson('/api/grid-simulator/status'),
       fetchJson('/api/grid-simulator/history?limit=500').catch(() => []),
     ]);
-    if (!s.existe) { body.innerHTML = '<div class="empty-state">La sombra todavía no arrancó.</div>'; return; }
-    const money = (n) => `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(2)}`;
-    const wr = (n) => (n === null || n === undefined ? '—' : `${n}%`);
-    const veredicto = { 'grid suma': '✅ el grid suma', 'grid resta': '❌ el grid resta', 'pocos datos': '⏳ pocos datos todavía' }[s.veredicto] || s.veredicto;
-    const ordenes = s.ordenes.length === 0
-      ? '<div class="empty-state">Sin órdenes activas.</div>'
-      : s.ordenes.map((o) => kv(o.tipo === 'compra' ? 'COMPRA 📈' : 'VENTA 📉', `${fmtUsdPrecise(o.precio)} × ${fmtUsd(o.montoUsdt)}`)).join('');
+    if (!s.existe) { body.innerHTML = '<div class="empty-state">La copia todavía no arrancó.</div>'; return; }
+
+    const base = s.par.split('/')[0];
+    const A = s.cuentaA; const B = s.cuentaB;
+    const dif = s.diferencia;
+    const ganaCopia = dif > 0.005; const ganaReal = dif < -0.005;
+    const veredicto = s.veredicto === 'pocos datos'
+      ? '<span class="pill info">⏳ muy pronto para decidir</span>'
+      : (dif > 0 ? '<span class="pill ok">✅ el grid está sumando</span>' : '<span class="pill warn">❌ el grid está restando</span>');
+    const fraseDif = Math.abs(dif) < 0.005
+      ? 'Van iguales: el grid todavía no ganó ni perdió nada.'
+      : `La copia va <b class="${pnlClass(dif)}">${ganaCopia ? 'ARRIBA' : 'ABAJO'} ${fmtUsd(Math.abs(dif))}</b> del bot real desde hace ${s.dias} día${s.dias === 1 ? '' : 's'}. Esa diferencia es todo lo que hizo el grid (ganancias menos pérdidas y fees).`;
+    const eg = s.estadoGrid;
+    const rg = s.resumenGrid;
+    const t = s.tendencia;
+
+    const checks = [
+      `${t.lateral === null ? '⏳' : (t.lateral ? '✅' : '⏳')} Mercado lateral: ${t.amplitudPct === null ? 'calculando…' : `se movió ${t.amplitudPct}% en 48 h (máx. ${t.maxPct}%)`}`,
+      `${t.sobreSma === null ? '⏳' : (t.sobreSma ? '✅' : '⏳')} Tendencia: ${t.sma === null ? 'calculando…' : `${base} ${t.sobreSma ? 'sobre' : 'bajo'} su promedio de 30 días (${fmtUsdPrecise(t.sma)})`}`,
+      `${s.gridActivo ? '✅' : '⏸️'} Grid ${s.gridActivo ? 'encendido' : 'pausado'}`,
+    ].map((c) => `<div class="kv"><span class="label" style="color:var(--text);">${c}</span></div>`).join('');
+
+    const prox = [
+      eg.proximaCompra ? kv('📥 Próxima compra', `si ${base} baja a ${fmtUsdPrecise(eg.proximaCompra.precio)} (${eg.proximaCompra.distanciaPct.toFixed(2)}%)`) : '',
+      eg.proximaVenta ? kv('📤 Próxima venta', `si ${base} sube a ${fmtUsdPrecise(eg.proximaVenta.precio)} (+${eg.proximaVenta.distanciaPct.toFixed(2)}%)`) : '',
+    ].join('');
+
+    const ciclos = s.ciclosDca.length === 0
+      ? '<div class="empty-state">Bot 4 no tiene ciclos abiertos ahora.</div>'
+      : `<div class="pair-grid">${s.ciclosDca.map((c) => `
+        <div class="pair-card" style="--pair-color:${pairColor(c.par)};">
+          <div class="pair-card-top"><div class="pair-card-name">${pairIconHtml(c.par, 22)} ${esc(c.par)}</div><span class="pill">${c.compras} compras</span></div>
+          ${kv('Invertido', fmtUsd(c.invertido))}
+          ${kv('Precio promedio', fmtUsdPrecise(c.promedio))}
+          ${kv('Precio actual', c.precioActual === null ? '—' : fmtUsdPrecise(c.precioActual))}
+          ${kv('Valor ahora', c.valorActual === null ? '—' : fmtUsd(c.valorActual))}
+          ${kv('Ganancia sin vender', c.pnlNoRealizado === null ? '—' : `${gMoney(c.pnlNoRealizado)} (${fmtPct(c.pnlPct, 2)})`, pnlClass(c.pnlNoRealizado))}
+        </div>`).join('')}</div>
+        <div class="stat-note">Estos ciclos son exactamente los mismos en el bot real y en la copia: la copia los hereda y replica cada compra y venta nueva.</div>`;
+
     const dias = s.historialDiario.length === 0
       ? '<div class="empty-state">El primer cierre diario aparece en unos minutos.</div>'
-      : `<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;">
-          <tr style="color:var(--text-dim);text-align:right;"><th style="text-align:left;">Día</th><th>🅰️ Real</th><th>🅱️ Copia</th><th>Dif.</th><th>Grid día</th></tr>
+      : `<div class="table-wrap"><table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+          <tr style="color:var(--text-dim);text-align:right;"><th style="text-align:left;">Día</th><th>🅰️ Real</th><th>🅱️ Copia</th><th>Diferencia</th><th>Grid ese día</th></tr>
           ${s.historialDiario.map((d) => `<tr style="text-align:right;border-top:1px solid var(--border);">
-            <td style="text-align:left;">${esc(d.dia)}</td><td>${fmtUsd(d.equityA)}</td><td>${fmtUsd(d.equityB)}</td>
-            <td class="${pnlClass(d.diferencia)}">${money(d.diferencia)}</td>
-            <td class="${pnlClass(d.pnlGridDia)}">${money(d.pnlGridDia)} (${d.tradesGridDia})</td></tr>`).join('')}
+            <td style="text-align:left;padding:6px 0;">${esc(d.dia)}</td><td>${fmtUsd(d.equityA)}</td><td>${fmtUsd(d.equityB)}</td>
+            <td class="${pnlClass(d.diferencia)}">${gMoney(d.diferencia)}</td>
+            <td class="${pnlClass(d.pnlGridDia)}">${gMoney(d.pnlGridDia)} · ${d.tradesGridDia} trades</td></tr>`).join('')}
         </table></div>`;
-    const tipoEv = { compra_bot4: '🟢 Compra Bot 4', venta_bot4: '💰 Venta Bot 4', deposito: '💵 Depósito', grid_liquida: '⚠️ Grid liquidó', inicio: '🏁 Inicio' };
-    const eventos = s.eventos.map((e) => kv(
-      `${esc(tipoEv[e.tipo] || e.tipo)} ${esc(e.par || '')} · ${esc(e.horaPeru || '')}`,
-      e.pnl !== null && e.pnl !== undefined ? money(e.pnl) : fmtUsd(e.monto), e.pnl !== null && e.pnl !== undefined ? pnlClass(e.pnl) : '')).join('');
 
-    clearAllCharts(); // el innerHTML de abajo reemplaza el contenedor de la gráfica
-    body.innerHTML =
-      cardHtml(`⚖️ Comparación · día ${s.dias}${s.gridActivo ? '' : ' · ⏸️ grid pausado'}`,
-        kv('Capital inicial', fmtUsd(s.capitalInicial))
-        + kv('🅰️ Bot real', `${fmtUsd(s.cuentaA.equity)} (${money(s.cuentaA.pnl)} · ${fmtPct(s.cuentaA.pnlPct, 2)})`, pnlClass(s.cuentaA.pnl))
-        + kv('🅱️ Bot copia (+ grid)', `${fmtUsd(s.cuentaB.equity)} (${money(s.cuentaB.pnl)} · ${fmtPct(s.cuentaB.pnlPct, 2)})`, pnlClass(s.cuentaB.pnl))
-        + kv('Diferencia (aporte del grid)', `${money(s.diferencia)} · ${fmtPct(s.diferenciaPct, 3)}`, pnlClass(s.diferencia))
-        + kv('Veredicto', veredicto))
-      + cardHtml('Diferencia 🅱️ − 🅰️ en el tiempo', '<div id="gridDiffChart" style="height:180px;"></div>')
-      + cardHtml('📅 Día a día', dias)
-      + cardHtml(`🔬 Grid ${esc(s.par)}`,
-        kv('Rango', `${fmtUsdPrecise(s.precioMin)} - ${fmtUsdPrecise(s.precioMax)} (±${(s.rangoPct * 100).toFixed(1)}%)`)
-        + kv('Precio actual', fmtUsdPrecise(s.precioActual))
-        + kv('Niveles / usa del efectivo', `${s.niveles} / ${(s.gridPct * 100).toFixed(0)}%`)
-        + kv('Filtro de tendencia (SMA 30d)', s.tendencia.sma === null ? 'calculando…' : `${fmtUsdPrecise(s.tendencia.sma)} · ${s.tendencia.enEspera ? '⏸️ en espera (mercado cayendo)' : (s.tendencia.sobreSma ? '✅ operando' : '⏳ sin compras nuevas (bajo la SMA)')}`)
-        + kv('Invertido en el grid', fmtUsd(s.gridInvertido))
-        + kv('Ciclos DCA abiertos (iguales en A y B)', fmtUsd(s.dcaAbiertoCosto)))
-      + cardHtml('HOY (grid)',
-        kv('Trades', `${s.hoy.trades} (✅ ${s.hoy.wins} · ❌ ${s.hoy.losses})`)
-        + kv('PnL bruto', money(s.hoy.pnlBruto), pnlClass(s.hoy.pnlBruto))
-        + kv('Fees', `-$${s.hoy.fees.toFixed(2)}`)
-        + kv('PnL neto', money(s.hoy.pnlNeto), pnlClass(s.hoy.pnlNeto)))
-      + cardHtml('ACUMULADO (grid)',
-        kv('PnL neto', money(s.acumulado.pnlGrid), pnlClass(s.acumulado.pnlGrid))
-        + kv('Fees pagadas', `-$${s.acumulado.feesGrid.toFixed(2)}`)
-        + kv('Trades / WR', `${s.acumulado.trades} / ${wr(s.acumulado.wr)}`))
-      + cardHtml('ÓRDENES ACTIVAS DEL GRID', ordenes)
-      + cardHtml('Últimos eventos (copiados de Bot 4)', eventos || '<div class="empty-state">Sin eventos todavía.</div>');
+    const actualizado = s.actualizado ? relativeTimeEs(s.actualizado) : '—';
 
-    // Gráfica de la diferencia (se crea después de pintar el contenedor).
-    const chart = ensureAreaChart('gridDiffChart', s.diferencia >= 0 ? '#16c784' : '#ea3943');
-    if (chart && hist.length > 1) {
-      const seen = new Set();
-      chart.series.setData(hist.filter((p) => !seen.has(p.t) && seen.add(p.t)).map((p) => ({ time: p.t, value: p.diferencia })));
-      chart.chart.timeScale().fitContent();
+    const html =
+      `<div class="stat-note" style="margin:-6px 0 12px;"><span class="live-dot"></span> en vivo · actualizado ${actualizado} · corrida desde ${esc(String(s.desde).slice(0, 10))} (día ${s.dias})</div>`
+      + `<details class="card" id="gridHow" ${gridHowOpen ? 'open' : ''}>
+          <summary style="cursor:pointer;font-weight:700;">❓ ¿Qué es esto y cómo se lee?</summary>
+          <div style="margin-top:10px;font-size:13px;line-height:1.6;">
+            <p><b>🅰️ Bot real</b> = tu Bot 4 de verdad, con el saldo que tienes en Binance.</p>
+            <p><b>🅱️ Bot copia</b> = una copia <u>ficticia</u> que empezó con el mismo saldo y hace <b>exactamente lo mismo</b> que Bot 4 (mismas compras, ventas, fees y depósitos). La única diferencia: además tiene un <b>grid</b> trabajando aparte con una parte del dinero que Bot 4 no está usando.</p>
+            <p><b>¿Qué es el grid?</b> Una escalera de precios. Cuando el mercado está lateral (sube y baja poco), el grid compra un poquito en cada bajada y lo vende en el siguiente rebote, ganando centavos muchas veces. Si el mercado se mueve mucho o cae, se queda quieto para no perder.</p>
+            <p><b>¿Cómo decido?</b> Mira la <b>Diferencia</b>: si la copia queda arriba del bot real durante varios días, el grid conviene. Si queda abajo, no. Nada de esto usa dinero real ni manda avisos a Telegram.</p>
+          </div></details>`
+      + `<div class="two-col" style="margin-bottom:16px;">
+          <div class="hero" style="margin:0;"><div class="hero-label">🅰️ Bot real — Bot 4</div>
+            <div class="hero-value">${fmtUsd(A.equity)}</div>
+            <div class="hero-sub"><span class="${pnlClass(A.pnl)}">${gMoney(A.pnl)} (${fmtPct(A.pnlPct, 2)})</span>${modePillHtml('live')}</div></div>
+          <div class="hero" style="margin:0;"><div class="hero-label">🅱️ Bot copia — Bot 4 + grid</div>
+            <div class="hero-value">${fmtUsd(B.equity)}</div>
+            <div class="hero-sub"><span class="${pnlClass(B.pnl)}">${gMoney(B.pnl)} (${fmtPct(B.pnlPct, 2)})</span><span class="pill paper">ficticio</span></div></div>
+        </div>`
+      + cardHtml('⚖️ Quién va mejor', `<div style="font-size:15px;margin-bottom:8px;">${fraseDif}</div>${veredicto}
+          <div class="stat-note" style="margin-top:8px;">${ganaReal ? 'El bot real va mejor que la copia.' : (ganaCopia ? 'La copia con grid va mejor que el bot real.' : '')} Capital de partida: ${fmtUsd(s.capitalInicial)}.</div>`)
+      + cardHtml(`🔬 Qué está haciendo el grid ahora ${s.gridActivo ? '' : '<span class="pill info">pausado</span>'}`,
+          `<div style="font-size:15px;font-weight:700;margin-bottom:4px;">${esc(eg.titulo)}</div>
+           <div style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">${esc(eg.detalle)}</div>${checks}${prox}
+           ${kv('Dinero ahora en el grid', `${fmtUsd(s.gridInvertido)} (${s.escalera.filter((l) => l.tipo === 'comprada').length} compras abiertas)`)}
+           ${kv('Efectivo libre de la copia', fmtUsd(s.efectivoCopia))}`)
+      + cardHtml(`📶 Escalera del grid — ${esc(s.par)}`, gridLadderHtml(s))
+      + `<div class="stat-row">
+          ${statBoxValueHtml('🎯 Win rate del grid', rg.winRate === null ? '—' : `${rg.winRate}%`)}
+          ${statBoxValueHtml('🔄 Trades cerrados', `${rg.trades} (✅ ${rg.ganados} · ❌ ${rg.perdidos})`)}
+          ${statBoxValueHtml('📈 PnL neto del grid', `<span class="${pnlClass(s.acumulado.pnlGrid)}">${gMoney(s.acumulado.pnlGrid)}</span>`)}
+        </div>`
+      + cardHtml('📊 Detalle del grid',
+          kv('Hoy', `${s.hoy.trades} trades · ${gMoney3(s.hoy.pnlNeto)} neto (bruto ${gMoney3(s.hoy.pnlBruto)}, fees -$${s.hoy.fees.toFixed(3)})`, pnlClass(s.hoy.pnlNeto))
+          + kv('Ganancia promedio por trade ganador', gMoney3(rg.gananciaPromedio), 'pnl-pos')
+          + kv('Pérdida promedio por trade perdedor', gMoney3(rg.perdidaPromedio), 'pnl-neg')
+          + kv('Mejor / peor trade', `${gMoney3(rg.mejor)} / ${gMoney3(rg.peor)}`)
+          + kv('Profit factor', rg.profitFactor === null ? '—' : rg.profitFactor)
+          + kv('Fees pagadas por el grid', `-$${s.acumulado.feesGrid.toFixed(3)}`)
+          + `<div class="stat-note">Profit factor = ganado ÷ perdido. Por encima de 1 el grid gana más de lo que pierde.</div>`)
+      + cardHtml('📉 Diferencia en el tiempo (🅱️ copia − 🅰️ real)', '<div id="gridDiffChart" style="height:190px;"></div><div class="stat-note">Por encima de cero = la copia con grid va ganando. Por debajo = va perdiendo.</div>')
+      + '<div class="section-title">Posiciones de Bot 4 (copiadas)</div>' + ciclos
+      + '<div class="section-title">Día a día</div>' + cardHtml('📅 Saldo al cierre de cada día', dias)
+      + '<div class="section-title">Actividad reciente</div>' + cardHtml('🕒 Qué pasó (Bot 4 copiado + grid)', gridActivityHtml(s.actividad))
+      + cardHtml('⚙️ Configuración del grid',
+          kv('Par', esc(s.par)) + kv('Rango', `${fmtUsdPrecise(s.precioMin)} - ${fmtUsdPrecise(s.precioMax)} (±${(s.rangoPct * 100).toFixed(0)}%)`)
+          + kv('Niveles (escalones)', s.niveles) + kv('Usa del efectivo libre', `${(s.gridPct * 100).toFixed(0)}%`)
+          + `<div class="stat-note">Elegida con una prueba de 1 año de BTC (con fees): solo compra con mercado lateral y sobre su promedio de 30 días.</div>`);
+
+    // Solo repinta si cambió algo (evita parpadeo cada 5 s).
+    if (html !== gridLastHtml) {
+      gridLastHtml = html;
+      clearAllCharts(); // el innerHTML reemplaza el contenedor de la gráfica
+      body.innerHTML = html;
+      const how = $('gridHow');
+      if (how) how.addEventListener('toggle', () => { gridHowOpen = how.open; });
+      const chart = ensureAreaChart('gridDiffChart', dif >= 0 ? '#16c784' : '#ea3943');
+      if (chart && hist.length > 1) {
+        const seen = new Set();
+        chart.series.setData(hist.filter((p) => !seen.has(p.t) && seen.add(p.t)).map((p) => ({ time: p.t, value: p.diferencia })));
+        chart.chart.timeScale().fitContent();
+      }
     }
   } catch (err) {
-    body.innerHTML = '<div class="empty-state">No se pudo cargar el Bot Sombra.</div>';
+    body.innerHTML = '<div class="empty-state">No se pudo cargar la copia con grid.</div>';
   }
 }
 

@@ -82,7 +82,7 @@ const CACHE_TTL_MS = {
   '/api/racha': CACHE_TTL_GENERAL,
   '/api/health': CACHE_TTL_GENERAL,
   '/api/grid-simulator/status': CACHE_TTL_CRITICAL,
-  '/api/grid-simulator/trades': CACHE_TTL_CRITICAL,
+  '/api/grid-simulator/history': CACHE_TTL_CRITICAL,
   '/api/metrics/daily': CACHE_TTL_GENERAL,
   '/api/metrics/monthly': CACHE_TTL_GENERAL,
   '/api/metrics/top-trades': CACHE_TTL_GENERAL,
@@ -1114,57 +1114,82 @@ async function refreshSettings() {
 }
 
 // =========================================================================
-// PÁGINA: GRID SIM (simulador ficticio, 2026-10-03) — nada de esto es dinero real
+// PÁGINA: BOT SOMBRA + GRID (2026-10-03) — réplica ficticia de Bot 4 (mismas
+// compras/ventas/fees/depósitos, copiadas de la DB real) con un grid lateral,
+// para decidir si el grid vale la pena en el bot real. Nada de esto es dinero real.
 // =========================================================================
 function renderGridSkeleton() {
   $('content').innerHTML = `
-    <div class="page-title">🔬 Grid Simulator</div>
+    <div class="page-title">🔬 Bot Sombra + Grid</div>
+    <div class="stat-note" style="margin-bottom:10px;">Réplica ficticia de Bot 4 con las mismas compras y ventas reales. La cuenta 🅱️ además opera un grid lateral — comparás las dos para ver si el grid suma.</div>
     <div id="gridSimBody"><div class="empty-state">Cargando…</div></div>`;
 }
 async function refreshGrid() {
   const body = $('gridSimBody');
   if (!body) return;
   try {
-    const [s, trades] = await Promise.all([
+    const [s, hist] = await Promise.all([
       fetchJson('/api/grid-simulator/status'),
-      fetchJson('/api/grid-simulator/trades?limit=20'),
+      fetchJson('/api/grid-simulator/history?limit=500').catch(() => []),
     ]);
-    if (!s.existe) { body.innerHTML = '<div class="empty-state">El simulador todavía no arrancó.</div>'; return; }
-    const earn = s.referencia.earnDisponible ? fmtUsd(s.referencia.earn) : 'N/D (permiso no habilitado)';
+    if (!s.existe) { body.innerHTML = '<div class="empty-state">La sombra todavía no arrancó.</div>'; return; }
     const money = (n) => `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(2)}`;
     const wr = (n) => (n === null || n === undefined ? '—' : `${n}%`);
+    const veredicto = { 'grid suma': '✅ el grid suma', 'grid resta': '❌ el grid resta', 'pocos datos': '⏳ pocos datos todavía' }[s.veredicto] || s.veredicto;
     const ordenes = s.ordenes.length === 0
       ? '<div class="empty-state">Sin órdenes activas.</div>'
-      : s.ordenes.map((o) => kv(
-        o.tipo === 'compra' ? 'COMPRA 📈' : 'VENTA 📉',
-        `${fmtUsdPrecise(o.precio)} × ${fmtUsd(o.montoUsdt)}`)).join('');
-    const hist = (trades || []).filter((t) => t.estado === 'cerrada').slice(0, 10).map((t) => kv(
-      `${esc(t.horaPeru || '')} · ${fmtUsdPrecise(t.precioEntrada)} → ${fmtUsdPrecise(t.precioSalida)}`,
-      money(t.pnl), pnlClass(t.pnl))).join('');
+      : s.ordenes.map((o) => kv(o.tipo === 'compra' ? 'COMPRA 📈' : 'VENTA 📉', `${fmtUsdPrecise(o.precio)} × ${fmtUsd(o.montoUsdt)}`)).join('');
+    const dias = s.historialDiario.length === 0
+      ? '<div class="empty-state">El primer cierre diario aparece en unos minutos.</div>'
+      : `<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;">
+          <tr style="color:var(--text-dim);text-align:right;"><th style="text-align:left;">Día</th><th>🅰️ Bot 4</th><th>🅱️ +Grid</th><th>Dif.</th><th>Grid día</th></tr>
+          ${s.historialDiario.map((d) => `<tr style="text-align:right;border-top:1px solid var(--border);">
+            <td style="text-align:left;">${esc(d.dia)}</td><td>${fmtUsd(d.equityA)}</td><td>${fmtUsd(d.equityB)}</td>
+            <td class="${pnlClass(d.diferencia)}">${money(d.diferencia)}</td>
+            <td class="${pnlClass(d.pnlGridDia)}">${money(d.pnlGridDia)} (${d.tradesGridDia})</td></tr>`).join('')}
+        </table></div>`;
+    const tipoEv = { compra_bot4: '🟢 Compra Bot 4', venta_bot4: '💰 Venta Bot 4', deposito: '💵 Depósito', grid_liquida: '⚠️ Grid liquidó', inicio: '🏁 Inicio' };
+    const eventos = s.eventos.map((e) => kv(
+      `${esc(tipoEv[e.tipo] || e.tipo)} ${esc(e.par || '')} · ${esc(e.horaPeru || '')}`,
+      e.pnl !== null && e.pnl !== undefined ? money(e.pnl) : fmtUsd(e.monto), e.pnl !== null && e.pnl !== undefined ? pnlClass(e.pnl) : '')).join('');
+
+    clearAllCharts(); // el innerHTML de abajo reemplaza el contenedor de la gráfica
     body.innerHTML =
-      cardHtml(`💰 Capital de referencia${s.activo ? '' : ' · ⏸️ pausado'} (${esc(s.par)})`,
-        kv('Spot disponible', fmtUsd(s.referencia.spot))
-        + kv('Earn flexible', earn)
-        + kv('Total inactivo', fmtUsd(s.referencia.total)))
-      + cardHtml('📊 Capital ficticio',
-        kv('Capital ficticio actual', fmtUsd(s.capitalFicticio))
-        + kv(`Diferencia vs inicial (${fmtUsd(s.capitalInicial)})`, `${money(s.diferencia)} ${s.diferencia >= 0 ? '✅' : '❌'}`, pnlClass(s.diferencia))
-        + kv('Rango actual', `${fmtUsdPrecise(s.precioMin)} - ${fmtUsdPrecise(s.precioMax)}`)
+      cardHtml(`⚖️ Comparación · día ${s.dias}${s.gridActivo ? '' : ' · ⏸️ grid pausado'}`,
+        kv('Capital inicial', fmtUsd(s.capitalInicial))
+        + kv('🅰️ Bot 4 solo (réplica)', `${fmtUsd(s.cuentaA.equity)} (${money(s.cuentaA.pnl)} · ${fmtPct(s.cuentaA.pnlPct, 2)})`, pnlClass(s.cuentaA.pnl))
+        + kv('🅱️ Bot 4 + grid', `${fmtUsd(s.cuentaB.equity)} (${money(s.cuentaB.pnl)} · ${fmtPct(s.cuentaB.pnlPct, 2)})`, pnlClass(s.cuentaB.pnl))
+        + kv('Diferencia (aporte del grid)', `${money(s.diferencia)} · ${fmtPct(s.diferenciaPct, 3)}`, pnlClass(s.diferencia))
+        + kv('Veredicto', veredicto))
+      + cardHtml('Diferencia 🅱️ − 🅰️ en el tiempo', '<div id="gridDiffChart" style="height:180px;"></div>')
+      + cardHtml('📅 Día a día', dias)
+      + cardHtml(`🔬 Grid ${esc(s.par)}`,
+        kv('Rango', `${fmtUsdPrecise(s.precioMin)} - ${fmtUsdPrecise(s.precioMax)} (±${(s.rangoPct * 100).toFixed(1)}%)`)
         + kv('Precio actual', fmtUsdPrecise(s.precioActual))
-        + kv('Niveles / WR', `${s.niveles} / ${wr(s.wr)}`))
-      + cardHtml('HOY',
+        + kv('Niveles / usa del efectivo', `${s.niveles} / ${(s.gridPct * 100).toFixed(0)}%`)
+        + kv('Invertido en el grid', fmtUsd(s.gridInvertido))
+        + kv('Ciclos DCA abiertos (iguales en A y B)', fmtUsd(s.dcaAbiertoCosto)))
+      + cardHtml('HOY (grid)',
         kv('Trades', `${s.hoy.trades} (✅ ${s.hoy.wins} · ❌ ${s.hoy.losses})`)
         + kv('PnL bruto', money(s.hoy.pnlBruto), pnlClass(s.hoy.pnlBruto))
         + kv('Fees', `-$${s.hoy.fees.toFixed(2)}`)
         + kv('PnL neto', money(s.hoy.pnlNeto), pnlClass(s.hoy.pnlNeto)))
-      + cardHtml('ACUMULADO',
-        kv('PnL total', money(s.acumulado.pnlTotal), pnlClass(s.acumulado.pnlTotal))
-        + kv('Días', s.acumulado.dias)
-        + kv('WR global', wr(s.acumulado.wr)))
-      + cardHtml('ÓRDENES ACTIVAS', ordenes)
-      + cardHtml('Últimos trades cerrados', hist || '<div class="empty-state">Todavía sin trades cerrados.</div>');
+      + cardHtml('ACUMULADO (grid)',
+        kv('PnL neto', money(s.acumulado.pnlGrid), pnlClass(s.acumulado.pnlGrid))
+        + kv('Fees pagadas', `-$${s.acumulado.feesGrid.toFixed(2)}`)
+        + kv('Trades / WR', `${s.acumulado.trades} / ${wr(s.acumulado.wr)}`))
+      + cardHtml('ÓRDENES ACTIVAS DEL GRID', ordenes)
+      + cardHtml('Últimos eventos (copiados de Bot 4)', eventos || '<div class="empty-state">Sin eventos todavía.</div>');
+
+    // Gráfica de la diferencia (se crea después de pintar el contenedor).
+    const chart = ensureAreaChart('gridDiffChart', s.diferencia >= 0 ? '#16c784' : '#ea3943');
+    if (chart && hist.length > 1) {
+      const seen = new Set();
+      chart.series.setData(hist.filter((p) => !seen.has(p.t) && seen.add(p.t)).map((p) => ({ time: p.t, value: p.diferencia })));
+      chart.chart.timeScale().fitContent();
+    }
   } catch (err) {
-    body.innerHTML = '<div class="empty-state">No se pudo cargar el Grid Simulator.</div>';
+    body.innerHTML = '<div class="empty-state">No se pudo cargar el Bot Sombra.</div>';
   }
 }
 

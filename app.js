@@ -81,6 +81,8 @@ const CACHE_TTL_MS = {
   '/api/bot/4/cycles': CACHE_TTL_DCA_TRADES,
   '/api/racha': CACHE_TTL_GENERAL,
   '/api/health': CACHE_TTL_GENERAL,
+  '/api/grid-simulator/status': CACHE_TTL_CRITICAL,
+  '/api/grid-simulator/trades': CACHE_TTL_CRITICAL,
   '/api/metrics/daily': CACHE_TTL_GENERAL,
   '/api/metrics/monthly': CACHE_TTL_GENERAL,
   '/api/metrics/top-trades': CACHE_TTL_GENERAL,
@@ -1112,14 +1114,70 @@ async function refreshSettings() {
 }
 
 // =========================================================================
+// PÁGINA: GRID SIM (simulador ficticio, 2026-10-03) — nada de esto es dinero real
+// =========================================================================
+function renderGridSkeleton() {
+  $('content').innerHTML = `
+    <div class="page-title">🔬 Grid Simulator</div>
+    <div id="gridSimBody"><div class="empty-state">Cargando…</div></div>`;
+}
+async function refreshGrid() {
+  const body = $('gridSimBody');
+  if (!body) return;
+  try {
+    const [s, trades] = await Promise.all([
+      fetchJson('/api/grid-simulator/status'),
+      fetchJson('/api/grid-simulator/trades?limit=20'),
+    ]);
+    if (!s.existe) { body.innerHTML = '<div class="empty-state">El simulador todavía no arrancó.</div>'; return; }
+    const earn = s.referencia.earnDisponible ? fmtUsd(s.referencia.earn) : 'N/D (permiso no habilitado)';
+    const money = (n) => `${n >= 0 ? '+' : '-'}$${Math.abs(n).toFixed(2)}`;
+    const wr = (n) => (n === null || n === undefined ? '—' : `${n}%`);
+    const ordenes = s.ordenes.length === 0
+      ? '<div class="empty-state">Sin órdenes activas.</div>'
+      : s.ordenes.map((o) => kv(
+        o.tipo === 'compra' ? 'COMPRA 📈' : 'VENTA 📉',
+        `${fmtUsdPrecise(o.precio)} × ${fmtUsd(o.montoUsdt)}`)).join('');
+    const hist = (trades || []).filter((t) => t.estado === 'cerrada').slice(0, 10).map((t) => kv(
+      `${esc(t.horaPeru || '')} · ${fmtUsdPrecise(t.precioEntrada)} → ${fmtUsdPrecise(t.precioSalida)}`,
+      money(t.pnl), pnlClass(t.pnl))).join('');
+    body.innerHTML =
+      cardHtml(`💰 Capital de referencia${s.activo ? '' : ' · ⏸️ pausado'} (${esc(s.par)})`,
+        kv('Spot disponible', fmtUsd(s.referencia.spot))
+        + kv('Earn flexible', earn)
+        + kv('Total inactivo', fmtUsd(s.referencia.total)))
+      + cardHtml('📊 Capital ficticio',
+        kv('Capital ficticio actual', fmtUsd(s.capitalFicticio))
+        + kv(`Diferencia vs inicial (${fmtUsd(s.capitalInicial)})`, `${money(s.diferencia)} ${s.diferencia >= 0 ? '✅' : '❌'}`, pnlClass(s.diferencia))
+        + kv('Rango actual', `${fmtUsdPrecise(s.precioMin)} - ${fmtUsdPrecise(s.precioMax)}`)
+        + kv('Precio actual', fmtUsdPrecise(s.precioActual))
+        + kv('Niveles / WR', `${s.niveles} / ${wr(s.wr)}`))
+      + cardHtml('HOY',
+        kv('Trades', `${s.hoy.trades} (✅ ${s.hoy.wins} · ❌ ${s.hoy.losses})`)
+        + kv('PnL bruto', money(s.hoy.pnlBruto), pnlClass(s.hoy.pnlBruto))
+        + kv('Fees', `-$${s.hoy.fees.toFixed(2)}`)
+        + kv('PnL neto', money(s.hoy.pnlNeto), pnlClass(s.hoy.pnlNeto)))
+      + cardHtml('ACUMULADO',
+        kv('PnL total', money(s.acumulado.pnlTotal), pnlClass(s.acumulado.pnlTotal))
+        + kv('Días', s.acumulado.dias)
+        + kv('WR global', wr(s.acumulado.wr)))
+      + cardHtml('ÓRDENES ACTIVAS', ordenes)
+      + cardHtml('Últimos trades cerrados', hist || '<div class="empty-state">Todavía sin trades cerrados.</div>');
+  } catch (err) {
+    body.innerHTML = '<div class="empty-state">No se pudo cargar el Grid Simulator.</div>';
+  }
+}
+
+// =========================================================================
 // ROUTER
 // =========================================================================
-const ROUTES = ['inicio', 'posiciones', 'historial', 'metricas', 'settings'];
+const ROUTES = ['inicio', 'posiciones', 'historial', 'metricas', 'gridsim', 'settings'];
 const ROUTE_RENDER = {
   inicio: renderInicioSkeleton,
   posiciones: renderPosicionesSkeleton,
   historial: renderHistorialSkeleton,
   metricas: renderMetricasSkeleton,
+  gridsim: renderGridSkeleton,
   settings: renderSettingsSkeleton,
 };
 const ROUTE_REFRESH = {
@@ -1127,6 +1185,7 @@ const ROUTE_REFRESH = {
   posiciones: refreshPosiciones,
   historial: refreshHistorial,
   metricas: refreshMetricas,
+  gridsim: refreshGrid,
   settings: refreshSettings,
 };
 let currentRoute = null;

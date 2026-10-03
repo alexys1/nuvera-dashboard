@@ -84,6 +84,8 @@ const CACHE_TTL_MS = {
   '/api/grid-simulator/status': CACHE_TTL_CRITICAL,
   '/api/grid-simulator/status': 4_000, // tiempo real: el bot actualiza cada 15 s
   '/api/grid-simulator/history': CACHE_TTL_CRITICAL,
+  '/api/grid-simulator/trades': 4_000,
+  '/api/grid-simulator/chart': 60_000,
   '/api/metrics/daily': CACHE_TTL_GENERAL,
   '/api/metrics/monthly': CACHE_TTL_GENERAL,
   '/api/metrics/top-trades': CACHE_TTL_GENERAL,
@@ -1156,17 +1158,95 @@ function gridActivityHtml(items) {
   return items.map((a) => `<div class="activity-row"><div class="activity-left"><span>${esc(a.texto)}</span></div><span class="stat-note" style="white-space:nowrap;">${relativeTimeEs(a.ts)}</span></div>`).join('');
 }
 
+const peruMs = (h) => Date.parse(`${String(h).replace(' ', 'T')}-05:00`);
+const gridTradeUnrealized = (t, precio) => (precio ? t.cantidad * precio - t.montoUsdt - t.feeSimulada : 0);
+
+// Tabla de operaciones: cada fila es UN ciclo del grid (compra → venta).
+function gridTradesHtml(trades, precios) {
+  const real = trades.filter((t) => t.motivo !== 'reset');
+  if (!real.length) return '<div class="empty-state">El grid todavía no hizo ninguna compra.</div>';
+  const filas = real.map((t) => {
+    const b = t.par.split('/')[0];
+    const abierta = t.estado === 'abierta';
+    const compra = `<b>${fmtUsdPrecise(t.precioEntrada)}</b><br><span class="stat-note">${fmtUsd(t.montoUsdt)} · ${esc(String(t.horaPeru).slice(5, 16))}</span>`;
+    let venta; let res;
+    if (abierta) {
+      const u = gridTradeUnrealized(t, precios[t.par]);
+      venta = `<span class="stat-note">espera vender a</span><br><b>${fmtUsdPrecise(t.precioObjetivo)}</b>`;
+      res = `<span class="pill info">⏳ sin vender</span><br><span class="${pnlClass(u)}">${gMoney3(u)}</span><span class="stat-note"> ahora</span>`;
+    } else {
+      const ok = t.pnl >= 0;
+      venta = `<b>${fmtUsdPrecise(t.precioSalida)}</b><br><span class="stat-note">${t.closedAt ? esc(formatTimePeruCompact(t.closedAt).split(' · ')[1] || '') : ''}</span>`;
+      res = `<span class="pill ${ok ? 'ok' : 'warn'}">${ok ? '✅ ganó' : '❌ perdió'}</span><br><span class="${pnlClass(t.pnl)}">${gMoney3(t.pnl)}</span>`;
+    }
+    return `<tr style="border-top:1px solid var(--border);vertical-align:top;">
+      <td style="padding:8px 6px 8px 0;">${pairIconHtml(t.par, 18)} <b>${esc(b)}</b></td><td>${compra}</td><td>${venta}</td><td style="text-align:right;">${res}</td></tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table style="width:100%;font-size:12.5px;border-collapse:collapse;">
+    <tr style="color:var(--text-dim);text-align:left;"><th></th><th>🟢 Compró a</th><th>📤 Vende / vendió a</th><th style="text-align:right;">Resultado</th></tr>${filas}</table></div>`;
+}
+
+// Gráfico de precio (48 h) con compras/ventas del grid encima y la escalera como líneas.
+async function drawGridPairChart(p, trades) {
+  const id = `gridPairChart_${p.par.split('/')[0]}`;
+  const box = $(id);
+  if (!box) return;
+  let velas = [];
+  try { velas = await fetchJson(`/api/grid-simulator/chart?par=${encodeURIComponent(p.par)}`); } catch (e) { /* sin velas */ }
+  if (!velas.length) { box.innerHTML = '<div class="empty-state">No se pudo cargar el precio.</div>'; return; }
+  if ($(id) !== box || chartInstances[id]) return;
+  const color = pairColor(p.par);
+  const chart = LightweightCharts.createChart(box, {
+    width: box.clientWidth, height: 230,
+    layout: { background: { color: 'transparent' }, textColor: '#8b949e', fontSize: 11 },
+    grid: { vertLines: { visible: false }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+    rightPriceScale: { borderColor: '#262631' },
+    timeScale: { borderColor: '#262631', timeVisible: true, secondsVisible: false },
+    handleScroll: false, handleScale: false,
+  });
+  chartInstances[id] = { chart, series: null };
+  const line = chart.addLineSeries({ color, lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
+  line.setData(velas.map((v) => ({ time: v.t, value: v.c })));
+  new ResizeObserver(() => { if (chartInstances[id]) chart.applyOptions({ width: box.clientWidth }); }).observe(box);
+  (p.escalera || []).forEach((l) => {
+    if (l.tipo === 'compra_pendiente') line.createPriceLine({ price: l.precio, color: 'rgba(243,186,47,0.7)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: 'comprará' });
+    if (l.tipo === 'comprada') line.createPriceLine({ price: l.objetivo, color: 'rgba(22,199,132,0.8)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: 'venderá' });
+  });
+  const t0 = velas[0].t; const times = velas.map((v) => v.t); const marks = [];
+  const nearest = (x) => times.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a));
+  trades.filter((t) => t.par === p.par && t.motivo !== 'reset').forEach((t) => {
+    const tc = Math.floor(peruMs(t.horaPeru) / 1000);
+    if (tc >= t0) marks.push({ time: nearest(tc), position: 'belowBar', color: '#16c784', shape: 'arrowUp', text: 'compra' });
+    if (t.estado === 'cerrada' && t.closedAt) {
+      const ts = Math.floor(new Date(t.closedAt).getTime() / 1000);
+      if (ts >= t0) marks.push({ time: nearest(ts), position: 'aboveBar', color: t.pnl >= 0 ? '#16c784' : '#ea3943', shape: 'arrowDown', text: `venta ${gMoney3(t.pnl)}` });
+    }
+  });
+  marks.sort((a, b) => a.time - b.time);
+  line.setMarkers(marks);
+  chart.timeScale().fitContent();
+}
+
 async function refreshGrid() {
   const body = $('gridSimBody');
   if (!body) return;
   try {
-    const [s, hist] = await Promise.all([
+    const [s, hist, trades, real] = await Promise.all([
       fetchJson('/api/grid-simulator/status'),
       fetchJson('/api/grid-simulator/history?limit=500').catch(() => []),
+      fetchJson('/api/grid-simulator/trades?limit=200').catch(() => []),
+      fetchJson('/api/bot/4/balance-real').catch(() => null),
     ]);
     if (!s.existe) { body.innerHTML = '<div class="empty-state">La copia todavía no arrancó.</div>'; return; }
 
-    const A = s.cuentaA; const B = s.cuentaB;
+    // El saldo real que guarda la copia se refresca 1 vez por minuto; el panel de Posiciones lo lee
+    // en vivo. Para que ambas pantallas muestren la misma cifra, aquí se usa el mismo dato en vivo.
+    const A = { ...s.cuentaA }; const B = { ...s.cuentaB };
+    if (real && real.live && typeof real.capitalRealTotal === 'number') {
+      const inicial = A.equity - A.pnl; const dB = B.equity - A.equity;
+      A.equity = real.capitalRealTotal; A.pnl = A.equity - inicial; A.pnlPct = (A.pnl / inicial) * 100;
+      B.equity = A.equity + dB; B.pnl = B.equity - inicial; B.pnlPct = (B.pnl / inicial) * 100;
+    }
     const dif = s.diferencia;
     const ganaCopia = dif > 0.005; const ganaReal = dif < -0.005;
     const veredicto = s.veredicto === 'pocos datos'
@@ -1193,6 +1273,8 @@ async function refreshGrid() {
       return cardHtml(`${pairIconHtml(p.par, 20)} Grid ${esc(p.par)} · ${fmtUsdPrecise(p.precioActual)}`,
         `<div style="font-size:15px;font-weight:700;margin-bottom:4px;">${esc(eg.titulo)}</div>
          <div style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">${esc(eg.detalle)}</div>${checks}${prox}
+         <div id="gridPairChart_${b}" style="height:230px;margin:10px 0 2px;"></div>
+         <div class="stat-note" style="margin-bottom:8px;">Precio de las últimas 48 h. ▲ verde = el grid compró · ▼ = el grid vendió · línea amarilla = donde comprará · línea verde = donde venderá lo ya comprado.</div>
          ${kv('En el grid ahora', `${fmtUsd(p.invertido)} (${p.comprasAbiertas} compras abiertas · ${fmtUsd(p.montoPorEscalon)} por escalón)`)}
          ${kv('Resultado de esta moneda', `${p.trades} trades · win rate ${p.winRate === null ? '—' : `${p.winRate}%`} · <span class="${pnlClass(p.pnl)}">${gMoney3(p.pnl)}</span>`)}
          <details style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;font-size:12.5px;">📶 Ver escalera de ${esc(b)}</summary><div style="margin-top:8px;">${gridLadderHtml(p)}</div></details>`);
@@ -1221,6 +1303,15 @@ async function refreshGrid() {
             <td class="${pnlClass(d.pnlGridDia)}">${gMoney(d.pnlGridDia)} · ${d.tradesGridDia} trades</td></tr>`).join('')}
         </table></div>`;
 
+    const precios = {}; s.pares.forEach((p) => { precios[p.par] = p.precioActual; });
+    const abiertas = trades.filter((t) => t.estado === 'abierta');
+    const sinVender = abiertas.reduce((n, t) => n + gridTradeUnrealized(t, precios[t.par]), 0);
+    const realizado = s.acumulado.pnlGrid;
+    const cerradas = rg.trades;
+    const explicacion = cerradas === 0
+      ? `El grid <b>todavía no vendió nada</b>: tiene <b>${abiertas.length} compra${abiertas.length === 1 ? '' : 's'} abierta${abiertas.length === 1 ? '' : 's'}</b> (${fmtUsd(s.gridInvertido)}) esperando que el precio suba al objetivo. Por eso no hay ganancia cerrada; lo que se ve es solo la <b>ganancia sin vender</b> de esas compras, que sube y baja con el precio hasta que se vendan.`
+      : `El grid ya cerró <b>${cerradas} operación${cerradas === 1 ? '' : 'es'}</b> (${rg.ganados} ganada${rg.ganados === 1 ? '' : 's'}, ${rg.perdidos} perdida${rg.perdidos === 1 ? '' : 's'}) y mantiene <b>${abiertas.length}</b> abierta${abiertas.length === 1 ? '' : 's'}.`;
+
     const actualizado = s.actualizado ? relativeTimeEs(s.actualizado) : '—';
 
     const html =
@@ -1236,13 +1327,17 @@ async function refreshGrid() {
       + `<div class="two-col" style="margin-bottom:16px;">
           <div class="hero" style="margin:0;"><div class="hero-label">🅰️ Bot real — Bot 4</div>
             <div class="hero-value">${fmtUsd(A.equity)}</div>
-            <div class="hero-sub"><span class="${pnlClass(A.pnl)}">${gMoney(A.pnl)} (${fmtPct(A.pnlPct, 2)})</span>${modePillHtml('live')}</div></div>
+            <div class="hero-sub"><span class="${pnlClass(A.pnl)}">${gMoney(A.pnl)} (${fmtPct(A.pnlPct, 2)})</span>${modePillHtml('live')}</div><div class="stat-note">ganado desde el inicio (en dólares y en % del capital)</div></div>
           <div class="hero" style="margin:0;"><div class="hero-label">🅱️ Bot copia — Bot 4 + grid</div>
             <div class="hero-value">${fmtUsd(B.equity)}</div>
-            <div class="hero-sub"><span class="${pnlClass(B.pnl)}">${gMoney(B.pnl)} (${fmtPct(B.pnlPct, 2)})</span><span class="pill paper">ficticio</span></div></div>
+            <div class="hero-sub"><span class="${pnlClass(B.pnl)}">${gMoney(B.pnl)} (${fmtPct(B.pnlPct, 2)})</span><span class="pill paper">ficticio</span></div><div class="stat-note">ganado desde el inicio (en dólares y en % del capital)</div></div>
         </div>`
       + cardHtml('⚖️ Quién va mejor', `<div style="font-size:15px;margin-bottom:8px;">${fraseDif}</div>${veredicto}
           <div class="stat-note" style="margin-top:8px;">${ganaReal ? 'El bot real va mejor que la copia.' : (ganaCopia ? 'La copia con grid va mejor que el bot real.' : '')} Capital de partida: ${fmtUsd(s.capitalInicial)}.</div>`)
+      + cardHtml('🔎 ¿De dónde sale esa diferencia?', `<div style="font-size:13.5px;line-height:1.6;margin-bottom:8px;">${explicacion}</div>`
+          + kv('✅ Ya cobrado (operaciones vendidas)', gMoney3(realizado), pnlClass(realizado))
+          + kv('⏳ Sin vender todavía (compras abiertas)', gMoney3(sinVender), pnlClass(sinVender))
+          + `<div class="stat-note">La diferencia entre las dos cuentas (${gMoney(dif)}) es lo cobrado + lo que aún no se vendió (ya descontadas las fees). Lo "sin vender" no es ganancia segura: solo se confirma cuando el grid vende.</div>`)
       + `<div class="section-title">Qué está haciendo el grid, moneda por moneda</div>`
       + `<div class="stat-note" style="margin:-4px 0 10px;text-align:center;">El grid compra en cada bajada y vende en el siguiente rebote, con una escalera propia por moneda. Dinero ahora en el grid: <b>${fmtUsd(s.gridInvertido)}</b> (${nCompras} compras abiertas) · efectivo libre de la copia: <b>${fmtUsd(s.efectivoCopia)}</b></div>`
       + fichas
@@ -1260,6 +1355,7 @@ async function refreshGrid() {
           + kv('Fees pagadas por el grid', `-$${s.acumulado.feesGrid.toFixed(3)}`)
           + `<div class="stat-note">Profit factor = ganado ÷ perdido. Por encima de 1 el grid gana más de lo que pierde.</div>`)
       + cardHtml('📉 Diferencia en el tiempo (🅱️ copia − 🅰️ real)', '<div id="gridDiffChart" style="height:190px;"></div><div class="stat-note">Por encima de cero = la copia con grid va ganando. Por debajo = va perdiendo.</div>')
+      + '<div class="section-title">Operaciones del grid</div>' + cardHtml('🧾 Cada compra y su venta', gridTradesHtml(trades, precios))
       + '<div class="section-title">Posiciones de Bot 4 (copiadas)</div>' + ciclos
       + '<div class="section-title">Día a día</div>' + cardHtml('📅 Saldo al cierre de cada día', dias)
       + '<div class="section-title">Actividad reciente</div>' + cardHtml('🕒 Qué pasó (Bot 4 copiado + grid)', gridActivityHtml(s.actividad))
@@ -1275,6 +1371,7 @@ async function refreshGrid() {
       body.innerHTML = html;
       const how = $('gridHow');
       if (how) how.addEventListener('toggle', () => { gridHowOpen = how.open; });
+      s.pares.forEach((p) => { drawGridPairChart(p, trades); });
       const chart = ensureAreaChart('gridDiffChart', dif >= 0 ? '#16c784' : '#ea3943');
       if (chart && hist.length > 1) {
         const seen = new Set();

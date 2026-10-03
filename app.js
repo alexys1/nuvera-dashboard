@@ -1148,7 +1148,7 @@ function gridLadderHtml(s) {
   });
   if (!priceDrawn) rows.push(priceRow);
   return `<div class="gl">${rows.join('')}</div>
-    <div class="stat-note" style="margin-top:8px;">Cada línea es un escalón. El grid compra cuando el precio <b>baja</b> hasta un escalón y vende cuando <b>sube</b> al de arriba. Si el precio se sale del rango, cierra todo y arma una escalera nueva.</div>`;
+`;
 }
 
 function gridActivityHtml(items) {
@@ -1166,7 +1166,6 @@ async function refreshGrid() {
     ]);
     if (!s.existe) { body.innerHTML = '<div class="empty-state">La copia todavía no arrancó.</div>'; return; }
 
-    const base = s.par.split('/')[0];
     const A = s.cuentaA; const B = s.cuentaB;
     const dif = s.diferencia;
     const ganaCopia = dif > 0.005; const ganaReal = dif < -0.005;
@@ -1176,20 +1175,28 @@ async function refreshGrid() {
     const fraseDif = Math.abs(dif) < 0.005
       ? 'Van iguales: el grid todavía no ganó ni perdió nada.'
       : `La copia va <b class="${pnlClass(dif)}">${ganaCopia ? 'ARRIBA' : 'ABAJO'} ${fmtUsd(Math.abs(dif))}</b> del bot real desde hace ${s.dias} día${s.dias === 1 ? '' : 's'}. Esa diferencia es todo lo que hizo el grid (ganancias menos pérdidas y fees).`;
-    const eg = s.estadoGrid;
     const rg = s.resumenGrid;
-    const t = s.tendencia;
+    const nombres = s.pares.map((p) => p.par.split('/')[0]).join(', ');
+    const nCompras = s.pares.reduce((n, p) => n + p.comprasAbiertas, 0);
 
-    const checks = [
-      `${t.lateral === null ? '⏳' : (t.lateral ? '✅' : '⏳')} Mercado lateral: ${t.amplitudPct === null ? 'calculando…' : `se movió ${t.amplitudPct}% en 48 h (máx. ${t.maxPct}%)`}`,
-      `${t.sobreSma === null ? '⏳' : (t.sobreSma ? '✅' : '⏳')} Tendencia: ${t.sma === null ? 'calculando…' : `${base} ${t.sobreSma ? 'sobre' : 'bajo'} su promedio de 30 días (${fmtUsdPrecise(t.sma)})`}`,
-      `${s.gridActivo ? '✅' : '⏸️'} Grid ${s.gridActivo ? 'encendido' : 'pausado'}`,
-    ].map((c) => `<div class="kv"><span class="label" style="color:var(--text);">${c}</span></div>`).join('');
-
-    const prox = [
-      eg.proximaCompra ? kv('📥 Próxima compra', `si ${base} baja a ${fmtUsdPrecise(eg.proximaCompra.precio)} (${eg.proximaCompra.distanciaPct.toFixed(2)}%)`) : '',
-      eg.proximaVenta ? kv('📤 Próxima venta', `si ${base} sube a ${fmtUsdPrecise(eg.proximaVenta.precio)} (+${eg.proximaVenta.distanciaPct.toFixed(2)}%)`) : '',
-    ].join('');
+    // Una ficha por moneda: estado en palabras, chequeos, próximas acciones, escalera y resultados.
+    const fichas = s.pares.map((p) => {
+      const b = p.par.split('/')[0]; const eg = p.estadoGrid; const t = p.tendencia;
+      const checks = [
+        `${t.lateral === null ? '⏳' : (t.lateral ? '✅' : '⏳')} Mercado lateral: ${t.amplitudPct === null ? 'calculando…' : `se movió ${t.amplitudPct}% en 48 h (máx. ${t.maxPct}%)`}`,
+        `${t.sobreSma === null ? '⏳' : (t.sobreSma ? '✅' : '⏳')} Tendencia: ${t.sma === null ? 'calculando…' : `${b} ${t.sobreSma ? 'sobre' : 'bajo'} su promedio de 30 días (${fmtUsdPrecise(t.sma)})`}`,
+      ].map((c) => `<div class="kv"><span class="label" style="color:var(--text);">${c}</span></div>`).join('');
+      const prox = [
+        eg.proximaCompra ? kv('📥 Próxima compra', `si ${b} baja a ${fmtUsdPrecise(eg.proximaCompra.precio)} (${eg.proximaCompra.distanciaPct.toFixed(2)}%)`) : '',
+        eg.proximaVenta ? kv('📤 Próxima venta', `si ${b} sube a ${fmtUsdPrecise(eg.proximaVenta.precio)} (+${eg.proximaVenta.distanciaPct.toFixed(2)}%)`) : '',
+      ].join('');
+      return cardHtml(`${pairIconHtml(p.par, 20)} Grid ${esc(p.par)} · ${fmtUsdPrecise(p.precioActual)}`,
+        `<div style="font-size:15px;font-weight:700;margin-bottom:4px;">${esc(eg.titulo)}</div>
+         <div style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">${esc(eg.detalle)}</div>${checks}${prox}
+         ${kv('En el grid ahora', `${fmtUsd(p.invertido)} (${p.comprasAbiertas} compras abiertas · ${fmtUsd(p.montoPorEscalon)} por escalón)`)}
+         ${kv('Resultado de esta moneda', `${p.trades} trades · win rate ${p.winRate === null ? '—' : `${p.winRate}%`} · <span class="${pnlClass(p.pnl)}">${gMoney3(p.pnl)}</span>`)}
+         <details style="margin-top:8px;"><summary style="cursor:pointer;font-weight:700;font-size:12.5px;">📶 Ver escalera de ${esc(b)}</summary><div style="margin-top:8px;">${gridLadderHtml(p)}</div></details>`);
+    }).join('');
 
     const ciclos = s.ciclosDca.length === 0
       ? '<div class="empty-state">Bot 4 no tiene ciclos abiertos ahora.</div>'
@@ -1217,7 +1224,7 @@ async function refreshGrid() {
     const actualizado = s.actualizado ? relativeTimeEs(s.actualizado) : '—';
 
     const html =
-      `<div class="stat-note" style="margin:-6px 0 12px;"><span class="live-dot"></span> en vivo · actualizado ${actualizado} · corrida desde ${esc(String(s.desde).slice(0, 10))} (día ${s.dias})</div>`
+      `<div class="stat-note" style="margin:-6px 0 12px;"><span class="live-dot"></span> en vivo · actualizado ${actualizado} · grid en ${esc(nombres)} · corrida desde ${esc(String(s.desde).slice(0, 10))} (día ${s.dias})</div>`
       + `<details class="card" id="gridHow" ${gridHowOpen ? 'open' : ''}>
           <summary style="cursor:pointer;font-weight:700;">❓ ¿Qué es esto y cómo se lee?</summary>
           <div style="margin-top:10px;font-size:13px;line-height:1.6;">
@@ -1236,12 +1243,9 @@ async function refreshGrid() {
         </div>`
       + cardHtml('⚖️ Quién va mejor', `<div style="font-size:15px;margin-bottom:8px;">${fraseDif}</div>${veredicto}
           <div class="stat-note" style="margin-top:8px;">${ganaReal ? 'El bot real va mejor que la copia.' : (ganaCopia ? 'La copia con grid va mejor que el bot real.' : '')} Capital de partida: ${fmtUsd(s.capitalInicial)}.</div>`)
-      + cardHtml(`🔬 Qué está haciendo el grid ahora ${s.gridActivo ? '' : '<span class="pill info">pausado</span>'}`,
-          `<div style="font-size:15px;font-weight:700;margin-bottom:4px;">${esc(eg.titulo)}</div>
-           <div style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">${esc(eg.detalle)}</div>${checks}${prox}
-           ${kv('Dinero ahora en el grid', `${fmtUsd(s.gridInvertido)} (${s.escalera.filter((l) => l.tipo === 'comprada').length} compras abiertas)`)}
-           ${kv('Efectivo libre de la copia', fmtUsd(s.efectivoCopia))}`)
-      + cardHtml(`📶 Escalera del grid — ${esc(s.par)}`, gridLadderHtml(s))
+      + `<div class="section-title">Qué está haciendo el grid, moneda por moneda</div>`
+      + `<div class="stat-note" style="margin:-4px 0 10px;text-align:center;">El grid compra en cada bajada y vende en el siguiente rebote, con una escalera propia por moneda. Dinero ahora en el grid: <b>${fmtUsd(s.gridInvertido)}</b> (${nCompras} compras abiertas) · efectivo libre de la copia: <b>${fmtUsd(s.efectivoCopia)}</b></div>`
+      + fichas
       + `<div class="stat-row">
           ${statBoxValueHtml('🎯 Win rate del grid', rg.winRate === null ? '—' : `${rg.winRate}%`)}
           ${statBoxValueHtml('🔄 Trades cerrados', `${rg.trades} (✅ ${rg.ganados} · ❌ ${rg.perdidos})`)}
@@ -1260,9 +1264,9 @@ async function refreshGrid() {
       + '<div class="section-title">Día a día</div>' + cardHtml('📅 Saldo al cierre de cada día', dias)
       + '<div class="section-title">Actividad reciente</div>' + cardHtml('🕒 Qué pasó (Bot 4 copiado + grid)', gridActivityHtml(s.actividad))
       + cardHtml('⚙️ Configuración del grid',
-          kv('Par', esc(s.par)) + kv('Rango', `${fmtUsdPrecise(s.precioMin)} - ${fmtUsdPrecise(s.precioMax)} (±${(s.rangoPct * 100).toFixed(0)}%)`)
-          + kv('Niveles (escalones)', s.niveles) + kv('Usa del efectivo libre', `${(s.gridPct * 100).toFixed(0)}%`)
-          + `<div class="stat-note">Elegida con una prueba de 1 año de BTC (con fees): solo compra con mercado lateral y sobre su promedio de 30 días.</div>`);
+          kv('Monedas', esc(nombres)) + kv('Rango de cada escalera', `±${(s.rangoPct * 100).toFixed(0)}%`)
+          + kv('Niveles (escalones)', s.niveles) + kv('Usa del efectivo libre', `${(s.gridPct * 100).toFixed(0)}% (repartido entre las monedas)`)
+          + `<div class="stat-note">Elegida con una prueba de 1 año (BTC +7%, ETH +9%, BNB +7%, con fees): solo compra con mercado lateral y sobre su promedio de 30 días.</div>`);
 
     // Solo repinta si cambió algo (evita parpadeo cada 5 s).
     if (html !== gridLastHtml) {

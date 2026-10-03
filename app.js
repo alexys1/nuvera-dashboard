@@ -278,9 +278,9 @@ function inicioSkeleton() {
       </div>
     </div>
     <div class="stat-row">
-      ${statBoxHtml('📈 PnL Total', 'inPnlTotal')}
-      ${statBoxHtml('🎯 Win Rate (7d)', 'inWinRate')}
-      ${statBoxHtml('🔄 Trades (hoy / 7d)', 'inTrades')}
+      ${statBoxHtml('📈 PnL Total (saldo real − capital inicial)', 'inPnlTotal')}
+      ${statBoxHtml('🎯 Win Rate (7d, por compra)', 'inWinRate')}
+      ${statBoxHtml('🔄 Compras cerradas (24h / 7d)', 'inTrades')}
     </div>
     <div class="card">
       <div class="chart-head">
@@ -303,9 +303,16 @@ function inicioSkeleton() {
 }
 
 let inCurrentPeriod = '7d';
+let inLiveCapital = null; // saldo real actual (lo fija refreshInicio) para cerrar la gráfica en el valor de hoy
 async function loadInicioChart(period, force = false) {
   try {
     const raw = await fetchJson(`/api/capital-chart?period=${period}`, { force });
+    // La serie guardada solo cambia al cerrar un ciclo: se agrega un punto "ahora" con el saldo real,
+    // para que el último valor de la gráfica coincida con el Capital Total de arriba.
+    if (raw && raw.length > 0 && inLiveCapital !== null) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (nowSec > raw[raw.length - 1].time) raw.push({ time: nowSec, value: Math.round(inLiveCapital * 100) / 100 });
+    }
     if (!raw || raw.length === 0) {
       $('inChartPlaceholder').style.display = 'flex';
       $('inChartPlaceholder').textContent = 'Sin datos de capital todavía.';
@@ -416,6 +423,7 @@ async function refreshInicio() {
     const pnlPct = isLive ? real.pnlPct : bot.pnlPct;
 
     $('inCapital').textContent = fmtUsd(capital);
+    inLiveCapital = capital;
     $('inPnlInline').innerHTML = `<span class="${pnlClass(pnlUsd)}">${fmtUsd(pnlUsd)} (${fmtPct(pnlPct)})</span>`;
     $('inStatusPill').innerHTML = statusPillHtml(bot.activo);
     $('inPnlTotal').textContent = fmtUsd(pnlUsd);
@@ -488,7 +496,7 @@ function updateAccumulationPairBlock(idPrefix, p) {
   $(`${idPrefix}-trigger-block`).innerHTML = p.nextTriggerPrice !== null ? `
     <hr>
     ${kv('Próximo trigger', fmtUsdPrecise(p.nextTriggerPrice))}
-    ${kv('Drop necesario', `-${p.dropRequiredPct}%`, 'pnl-neg')}
+    ${kv('Falta bajar', `-${p.dropRequiredPct}%`, 'pnl-neg')}
   ` : `<hr><div class="stat-note">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`;
 }
 let poPairKeys = null;
@@ -504,8 +512,11 @@ function renderAccumulationPathIncremental(pares) {
 
 function estadoGeneralThoughts(pensamientos) {
   if (!pensamientos || pensamientos.length === 0) return { icon: '⚪', label: 'SIN DATOS', sub: 'Todavía no hay pensamientos registrados.' };
-  if (pensamientos.some((p) => p.decision === 'comprar')) return { icon: '🟢', label: 'COMPRANDO', sub: 'Encontró una entrada con confianza suficiente.' };
-  return { icon: '🟡', label: 'ANALIZANDO', sub: 'Mercado bajo análisis, esperando mejor punto de entrada.' };
+  // "Comprando" solo si la decisión de comprar es reciente: cada par muestra su ÚLTIMA decisión, que puede
+  // tener horas o días; antes eso se mostraba siempre como "COMPRANDO".
+  const reciente = (p) => p.decision === 'comprar' && Date.now() - new Date(p.timestamp).getTime() < 10 * 60 * 1000;
+  if (pensamientos.some(reciente)) return { icon: '🟢', label: 'COMPRANDO', sub: 'Acaba de comprar tras cumplirse la caída necesaria.' };
+  return { icon: '🟡', label: 'ESPERANDO CAÍDA', sub: 'Sin compras recientes: el bot espera que el precio baje lo necesario para la próxima compra.' };
 }
 function cambio7dInfo(pct) {
   if (pct === null || pct === undefined) return { texto: 'N/D', cls: '', icon: '' };
@@ -545,7 +556,7 @@ function renderThoughtsPanel(data) {
       <div class="thought-block">
         <div class="thought-pair">${esc(p.par)}</div>
         <div class="thought-quote">💭 "${esc(p.razon || p.accion || 'sin detalle')}"</div>
-        <div class="stat-note">Confianza actual: ${p.confianza}% | Necesita: ${data.confianzaMinima}%</div>
+        <div class="stat-note">Decisión de ${relativeTimeEs(p.timestamp)} · Confianza ${p.confianza}% (mínimo ${data.confianzaMinima}%)</div>
       </div>`).join('');
   return cardHtml(
     '🧠 Qué está pensando el bot',
@@ -672,8 +683,12 @@ async function refreshPosiciones() {
     $('poInvertido').textContent = fmtUsd(invertidoShown);
     $('poLibre').textContent = fmtUsd(libreShown);
 
+    // Con saldo real, cada moneda se muestra a valor de mercado (igual que en "Saldo real en Binance") para
+    // que Monedas + Libre + Earn sumen el Capital Total; sin saldo real se usa el costo invertido.
     const donutEntries = [
-      ...Object.entries(path.pares).map(([pair, p]) => ({ label: pair.split('/')[0], value: p.totalInvested, color: pairColor(pair) })),
+      ...(real && real.live
+        ? Object.entries(real.posiciones).map(([sym, p]) => ({ label: sym, value: p.valorUsd, color: pairColor(`${sym}/USDT`) }))
+        : Object.entries(path.pares).map(([pair, p]) => ({ label: pair.split('/')[0], value: p.totalInvested, color: pairColor(pair) }))),
       { label: 'Libre', value: libreShown, color: '#8b8fa3' },
       ...(earnShown > 0 ? [{ label: 'Earn', value: earnShown, color: '#f0b429' }] : []),
     ];
@@ -702,8 +717,15 @@ async function refreshPosiciones() {
 
     $('poConfigStats').innerHTML = [
       statBoxValueHtml('Orden por compra', path.config.baseOrderUsd !== null ? fmtUsd(path.config.baseOrderUsd) : 'variable'),
-      statBoxValueHtml('Take Profit', `${path.config.tpMinPct}% – ${path.config.tpMaxPct}%`),
-      statBoxValueHtml('Máx. compras', path.config.maxCompras),
+      statBoxValueHtml('Take Profit', path.config.tpMinPct === path.config.tpMaxPct ? `${path.config.tpMinPct}%` : `${path.config.tpMinPct}% – ${path.config.tpMaxPct}%<div class="stat-note">1ª compra ${path.config.tpMaxPct}% · siguientes ${path.config.tpMinPct}%</div>`),
+      statBoxValueHtml('Máx. compras por ciclo', (() => {
+        const por = path.config.maxComprasPorPar;
+        if (!por) return path.config.maxCompras;
+        const vals = Object.values(por);
+        return vals.every((v) => v === vals[0])
+          ? `${vals[0]}<div class="stat-note">por moneda</div>`
+          : Object.entries(por).map(([k, v]) => `${esc(k.split('/')[0])} ${v}`).join(' · ');
+      })()),
     ].join('');
     $('poDropLabel').textContent = `Drop trigger: ${path.config.dropPctLabel}`;
     $('poErrorBanner').innerHTML = '';
@@ -790,11 +812,11 @@ function comparativaPorCriptoHtml(cycles) {
 function historialSkeleton() {
   return `
     <div class="page-title">📜 Historial de Ciclos — Bot 4</div>
-    <div class="page-sub">Cada tarjeta es un ciclo completo: todas las compras DCA de un par, cerradas juntas en la misma venta.</div>
+    <div class="page-sub">Cada tarjeta es un ciclo completo: todas las compras DCA de un par, cerradas juntas en la misma venta. Las ganancias son netas (ya descontadas las fees de compra y venta).</div>
     <div class="stat-row">
       ${statBoxHtml('📜 Ciclos cerrados', 'hiTotalCiclos')}
       ${statBoxHtml('🎯 Win Rate', 'hiWinRate')}
-      ${statBoxHtml('📈 PnL total', 'hiPnlTotal')}
+      ${statBoxHtml('📈 Ganancia neta (ciclos mostrados)', 'hiPnlTotal')}
     </div>
     <div class="card">
       <div class="card-title">📊 Comparativa por cripto</div>
@@ -820,7 +842,7 @@ function renderHistorialSummary(cycles) {
 }
 async function refreshHistorial() {
   try {
-    const cycles = await fetchJson('/api/bot/4/cycles');
+    const cycles = await fetchJson('/api/bot/4/cycles?limit=5000');
     renderHistorialSummary(cycles || []);
     $('hiComparativaPanel').innerHTML = comparativaPorCriptoHtml(cycles);
     renderDcaCyclesIncremental(cycles || []);
@@ -853,7 +875,7 @@ let metCyclesCache = [];
 function metricasSkeleton() {
   return `
     <div class="page-title">📈 Métricas — Bot 4</div>
-    <div class="page-sub">Solo ganancias REALES de trades cerrados (no incluye capital agregado a mano)</div>
+    <div class="page-sub">Solo ganancias REALES de compras cerradas (no incluye capital agregado a mano). Bruta − fees = Neta; todas las cifras de esta página y del Historial son netas de fees reales.</div>
 
     <div class="card">
       <div class="chart-head">
@@ -968,13 +990,13 @@ function renderMetSummary(m) {
   if (!m) { $('metSummaryRow').innerHTML = '<div class="empty-state">No se pudo cargar.</div>'; return; }
   $('metSummaryRow').innerHTML = [
     statBoxValueHtml('Días operando', m.diasOperando),
-    statBoxValueHtml('Trades cerrados', m.tradesCerrados),
-    statBoxValueHtml('Ganancia bruta', `<span class="${pnlClass(m.pnlBruto)}">${fmtUsd(m.pnlBruto)}</span>`),
-    statBoxValueHtml('Fees pagados', `<span class="pnl-neg">-${fmtUsd(Math.abs(m.feesTotal))}</span>`),
-    statBoxValueHtml('Ganancia NETA', `<span class="${pnlClass(m.pnlNeto)}">${fmtUsd(m.pnlNeto)} ${m.pnlNeto >= 0 ? '✅' : ''}</span>`),
+    statBoxValueHtml('Compras cerradas', m.tradesCerrados),
+    statBoxValueHtml('Ganancia bruta (antes de fees)', `<span class="${pnlClass(m.pnlBruto)}">${fmtUsd(m.pnlBruto)}</span>`),
+    statBoxValueHtml('Fees pagados (compra + venta)', `<span class="pnl-neg">-${fmtUsd(Math.abs(m.feesTotal))}</span>`),
+    statBoxValueHtml('Ganancia NETA (bruta − fees)', `<span class="${pnlClass(m.pnlNeto)}">${fmtUsd(m.pnlNeto)} ${m.pnlNeto >= 0 ? '✅' : ''}</span>`),
     statBoxValueHtml('Mejor día', `<span class="pnl-pos">${m.mejorDia ? m.mejorDia.fecha : '—'}</span><div class="stat-note">${m.mejorDia ? fmtUsd(m.mejorDia.pnl) : ''}</div>`),
     statBoxValueHtml('Peor día', `<span class="pnl-neg">${m.peorDia ? m.peorDia.fecha : '—'}</span><div class="stat-note">${m.peorDia ? fmtUsd(m.peorDia.pnl) : ''}</div>`),
-    statBoxValueHtml('Win Rate del mes', `${m.winRate}%`),
+    statBoxValueHtml('Win Rate del mes (por compra)', `${m.winRate}%`),
     statBoxValueHtml('Profit Factor', m.profitFactor !== null ? m.profitFactor.toFixed(2) : '∞'),
   ].join('');
 }
@@ -1013,7 +1035,7 @@ async function refreshMetricas() {
       fetchJson('/api/metrics/daily'),
       fetchJson('/api/metrics/monthly'),
       fetchJson('/api/metrics/top-trades'),
-      fetchJson('/api/bot/4/cycles').catch(() => []),
+      fetchJson('/api/bot/4/cycles?limit=5000').catch(() => []),
     ]);
     metDailyMap = {};
     daily.forEach((d) => { metDailyMap[d.fecha] = d; });

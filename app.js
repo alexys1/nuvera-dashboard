@@ -79,6 +79,7 @@ const CACHE_TTL_MS = {
   '/api/bot/4/balance-real': CACHE_TTL_CRITICAL,
   '/api/bot/4/thoughts': CACHE_TTL_CRITICAL,
   '/api/bot/4/cycles': CACHE_TTL_DCA_TRADES,
+  '/api/bot/4/fees-metricas': CACHE_TTL_GENERAL,
   '/api/racha': CACHE_TTL_GENERAL,
   '/api/health': CACHE_TTL_GENERAL,
   '/api/metrics/daily': CACHE_TTL_GENERAL,
@@ -906,6 +907,9 @@ function metricasSkeleton() {
     <div class="section-title">Resumen del mes</div>
     <div class="stat-row" id="metSummaryRow"><div class="empty-state">Cargando…</div></div>
 
+    <div class="section-title">⛽ Fees por moneda de pago (últimos 30 días)</div>
+    <div class="card"><div id="metFeesBody"><div class="empty-state">Cargando…</div></div></div>
+
     <div class="section-title">🏆 Top trades del mes</div>
     <div class="two-col">
       <div class="card"><div class="card-title">Mejores 5</div><div id="metTopBest"><div class="empty-state">Cargando…</div></div></div>
@@ -1001,6 +1005,27 @@ function renderMetSummary(m) {
   ].join('');
 }
 
+// Fees por moneda de pago (GET /api/bot/4/fees-metricas): cuánto pagó Binance en BNB (0.075 %) vs otra moneda (0.1 %).
+function renderMetFees(f) {
+  const el = $('metFeesBody');
+  if (!f || !f.porMoneda || f.porMoneda.length === 0) {
+    el.innerHTML = '<div class="empty-state">Aún sin órdenes registradas con este desglose (se llena con cada compra/venta nueva).</div>';
+    return;
+  }
+  const filas = f.porMoneda.map((r) => kv(`${esc(r.asset)} · ${r.side === 'buy' ? 'compras' : 'ventas'} (${r.ordenes} órdenes)`, `${fmtUsdPrecise(r.fee_usdt, 4)}`)).join('');
+  const noBnb = (f.ultimosNoBnb || []).slice(0, 5).map((r) => kv(
+    `${esc(r.asset)} · ${r.side === 'buy' ? 'compra' : 'venta'} ${esc(r.pair)} · ${esc(String(r.ts).slice(0, 16).replace('T', ' '))} UTC`,
+    `${Number(r.cantidad).toFixed(8)} @ ${fmtUsdPrecise(r.precio_usdt, 2)} = ${fmtUsdPrecise(r.fee_usdt, 5)}`, 'pnl-neg')).join('');
+  el.innerHTML =
+    `<div class="stat-row">${[
+      statBoxValueHtml('Fees totales', fmtUsdPrecise(f.feeTotalUsdt, 4)),
+      statBoxValueHtml('Pagados en BNB', fmtUsdPrecise(f.feePagadoEnBnbUsdt, 4)),
+      statBoxValueHtml('Pagados en otra moneda', `<span class="${f.feePagadoEnOtraMonedaUsdt > 0 ? 'pnl-neg' : ''}">${fmtUsdPrecise(f.feePagadoEnOtraMonedaUsdt, 4)}</span>`),
+      statBoxValueHtml('% pagado con BNB', f.pctEnBnb === null ? '—' : `${f.pctEnBnb.toFixed(1)}%`),
+    ].join('')}</div>${filas}` +
+    (noBnb ? `<div class="card-title" style="margin-top:12px;">Últimos fees NO pagados en BNB</div>${noBnb}` : '');
+}
+
 function renderMetTopTrades(top) {
   const renderList = (list) => (!list || list.length === 0
     ? '<div class="empty-state">Sin trades este mes.</div>'
@@ -1031,11 +1056,12 @@ function renderMetricasSkeleton() {
 
 async function refreshMetricas() {
   try {
-    const [daily, monthly, top, cycles] = await Promise.all([
+    const [daily, monthly, top, cycles, fees] = await Promise.all([
       fetchJson('/api/metrics/daily'),
       fetchJson('/api/metrics/monthly'),
       fetchJson('/api/metrics/top-trades'),
       fetchJson('/api/bot/4/cycles?limit=5000').catch(() => []),
+      fetchJson('/api/bot/4/fees-metricas?dias=30').catch(() => null),
     ]);
     metDailyMap = {};
     daily.forEach((d) => { metDailyMap[d.fecha] = d; });
@@ -1044,6 +1070,7 @@ async function refreshMetricas() {
     renderMetDayDetail();
     loadMetBarChart(daily);
     renderMetSummary(monthly);
+    renderMetFees(fees);
     renderMetTopTrades(top);
   } catch (err) {
     $('metSummaryRow').innerHTML = '<div class="empty-state">No se pudo cargar la información de métricas.</div>';

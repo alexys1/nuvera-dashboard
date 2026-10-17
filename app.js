@@ -79,6 +79,7 @@ const CACHE_TTL_MS = {
   '/api/bot/4/balance-real': CACHE_TTL_CRITICAL,
   '/api/bot/4/thoughts': CACHE_TTL_CRITICAL,
   '/api/bot/4/earn': CACHE_TTL_CRITICAL,
+  '/api/bot/4/earn/historial': CACHE_TTL_CRITICAL,
   '/api/bot/4/cycles': CACHE_TTL_DCA_TRADES,
   '/api/bot/4/fees-metricas': CACHE_TTL_GENERAL,
   '/api/racha': CACHE_TTL_GENERAL,
@@ -509,6 +510,10 @@ function updateAccumulationPairBlock(idPrefix, p) {
 // Botón arriba: alterna entre "Compras" y "Earn". El "ganado" se va sumando en vivo (cantidad × APR / segundo)
 // entre refrescos de /api/bot/4/earn. Con APR ~2% son centavos al día: por eso se muestran 6-8 decimales.
 let earnData = null;
+let earnHist = null; // /api/bot/4/earn/historial: recompensas YA PAGADAS por día (desde 2026-10-17)
+let earnCalYear = null;
+let earnCalMonth = null;
+let earnCalSel = null;
 let poUltimosPares = null;
 let earnModo = false;
 try { earnModo = localStorage.getItem('earnModo') === '1'; } catch (e) { /* sin storage */ }
@@ -555,8 +560,62 @@ function renderEarnResumen() {
     ${kv('Ganado acumulado', `<span id="earnTotalLive">—</span>`, 'pnl-pos')}
     ${kv('Ritmo actual', `${fmtMini(earnData.porDiaUsd)} al día`)}
     ${u ? kv('USDT en Earn', `${fmtUsd(u.valorUsd)} · APR ${u.aprPct}% · ganado ${fmtMini(u.acumuladoUsd)}`) : ''}
-  </div>`;
+  </div>
+  ${earnCalendarioHtml()}`;
+  r.querySelectorAll('[data-earn-nav]').forEach((b) => b.addEventListener('click', () => {
+    earnCalMonth += Number(b.dataset.earnNav);
+    if (earnCalMonth < 0) { earnCalMonth = 11; earnCalYear -= 1; } else if (earnCalMonth > 11) { earnCalMonth = 0; earnCalYear += 1; }
+    earnCalSel = null; renderEarnResumen();
+  }));
+  r.querySelectorAll('.mc-day[data-earn-fecha]').forEach((el) => el.addEventListener('click', () => {
+    earnCalSel = earnCalSel === el.dataset.earnFecha ? null : el.dataset.earnFecha; renderEarnResumen();
+  }));
   tickEarn();
+}
+// Calendario aparte de lo que Earn YA PAGÓ (Binance paga 1 vez al día, ~23:59 UTC = 18:59 Lima). Hoy aparece vacío
+// hasta el pago; lo que sube en vivo arriba es una estimación. Mismo estilo que el calendario de ganancias.
+function earnCalendarioHtml() {
+  if (earnCalYear === null) { const n = peruNow(); earnCalYear = n.getFullYear(); earnCalMonth = n.getMonth(); }
+  const mapa = {};
+  ((earnHist && earnHist.dias) || []).forEach((d) => { mapa[d.fecha] = d; });
+  const primero = (new Date(Date.UTC(earnCalYear, earnCalMonth, 1)).getUTCDay() + 6) % 7;
+  const dias = new Date(Date.UTC(earnCalYear, earnCalMonth + 1, 0)).getUTCDate();
+  const prefijo = `${earnCalYear}-${String(earnCalMonth + 1).padStart(2, '0')}`;
+  const delMes = Object.values(mapa).filter((d) => d.fecha.startsWith(prefijo));
+  const maxUsd = Math.max(1e-9, ...delMes.map((d) => d.usd));
+  let celdas = '';
+  for (let i = 0; i < primero; i++) celdas += '<div class="mc-day empty"></div>';
+  for (let n = 1; n <= dias; n++) {
+    const fecha = `${prefijo}-${String(n).padStart(2, '0')}`;
+    const d = mapa[fecha];
+    const heat = d ? ` style="--mc-heat-bg: rgba(22,199,132, ${(0.12 + (d.usd / maxUsd) * 0.55).toFixed(2)});"` : '';
+    celdas += `<div class="mc-day${d ? ' pos' : ''}${fecha === earnCalSel ? ' selected' : ''}" data-earn-fecha="${fecha}"${heat}>
+      <span class="mc-day-num">${n}</span>${d ? `<span class="mc-day-pnl">+${fmtMini(d.usd)}</span>` : ''}</div>`;
+  }
+  const sel = earnCalSel && mapa[earnCalSel];
+  const detalle = earnCalSel
+    ? `<div style="margin-top:10px;">${sel
+      ? Object.entries(sel.monedas).map(([a, m]) => kv(`${earnCalSel} · ${esc(a)}`, `${m.cantidad.toFixed(8)} ${esc(a)} · ${fmtMini(m.usd)}`, 'pnl-pos')).join('')
+      : `<div class="stat-note">${earnCalSel}: sin pagos de Earn registrados.</div>`}</div>`
+    : '';
+  const totalMes = delMes.reduce((s, d) => s + d.usd, 0);
+  return `<div class="card" style="margin-bottom:14px;">
+    <div class="chart-head">
+      <div class="card-title" style="margin:0;">📅 Calendario de Earn (pagado)</div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button class="period-btn" data-earn-nav="-1">‹</button>
+        <span style="min-width:120px; text-align:center; display:inline-block; font-weight:700; font-size:12.5px;">${MET_MESES_LARGOS[earnCalMonth]} ${earnCalYear}</span>
+        <button class="period-btn" data-earn-nav="1">›</button>
+      </div>
+    </div>
+    <div class="metrics-calendar-wrap">
+      <div class="metrics-calendar-weekdays">${MET_DIAS_SEMANA.map((d) => `<div class="mc-weekday">${d}</div>`).join('')}</div>
+      <div class="metrics-calendar">${celdas}</div>
+    </div>
+    ${detalle}
+    ${kv('Pagado en el mes', fmtMini(totalMes), 'pnl-pos')}
+    ${kv('Pagado desde el 17/10', fmtMini((earnHist && earnHist.totalUsd) || 0), 'pnl-pos')}
+  </div>`;
 }
 function tickEarn() {
   if (!earnData) return;
@@ -725,6 +784,7 @@ async function refreshPosiciones() {
     const id = await getBot4Id();
     if (id === null) throw new Error('bot no encontrado');
     fetchJson('/api/bot/4/earn').then((d) => { earnData = d; renderEarnResumen(); renderEarnPanes(poUltimosPares); }).catch(() => {});
+    fetchJson('/api/bot/4/earn/historial').then((d) => { earnHist = d; renderEarnResumen(); }).catch(() => {});
     const [bot, real, thoughts, path] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson('/api/bot/4/balance-real').catch(() => null),

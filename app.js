@@ -78,6 +78,7 @@ const CACHE_TTL_MS = {
   '/api/competition/ranking': CACHE_TTL_GENERAL,
   '/api/bot/4/balance-real': CACHE_TTL_CRITICAL,
   '/api/bot/4/thoughts': CACHE_TTL_CRITICAL,
+  '/api/bot/4/earn': CACHE_TTL_CRITICAL,
   '/api/bot/4/cycles': CACHE_TTL_DCA_TRADES,
   '/api/bot/4/fees-metricas': CACHE_TTL_GENERAL,
   '/api/racha': CACHE_TTL_GENERAL,
@@ -472,12 +473,15 @@ function accumulationPairBlockSkeleton(pair, idPrefix) {
         <div class="pair-card-name">${pairIconHtml(pair, 22)} ${esc(pair.split('/')[0])}</div>
         <div id="${idPrefix}-ring">${progressRingSvg(color)}</div>
       </div>
+      <div class="pane-compras">
       <div class="stat-note" id="${idPrefix}-ciclo" style="margin-bottom:8px;">—</div>
       ${kv('Avg Entry', `<span id="${idPrefix}-avg-entry">—</span>`)}
       ${kv('Precio actual', `<span id="${idPrefix}-precio-actual">—</span>`)}
       ${kv('Invertido', `<span id="${idPrefix}-capital-invertido">—</span>`)}
       <div id="${idPrefix}-tp-block"></div>
       <div id="${idPrefix}-trigger-block"></div>
+      </div>
+      <div class="pane-earn" id="${idPrefix}-earn"><div class="stat-note">Cargando Earn…</div></div>
     </div>`;
 }
 function updateAccumulationPairBlock(idPrefix, p) {
@@ -500,6 +504,74 @@ function updateAccumulationPairBlock(idPrefix, p) {
     ${kv('Falta bajar', `-${p.dropRequiredPct}%`, 'pnl-neg')}
   ` : `<hr><div class="stat-note">${p.triggerNote ? esc(p.triggerNote) : (p.compras >= p.maxCompras ? 'Ciclo completo, esperando Take Profit.' : 'Esperando caída para la próxima compra.')}</div>`;
 }
+
+// ---------- Earn (2026-10-17, pedido explícito): cada tarjeta tiene una 2ª cara con lo que gana en Earn ----------
+// Botón arriba: alterna entre "Compras" y "Earn". El "ganado" se va sumando en vivo (cantidad × APR / segundo)
+// entre refrescos de /api/bot/4/earn. Con APR ~2% son centavos al día: por eso se muestran 6-8 decimales.
+let earnData = null;
+let poUltimosPares = null;
+let earnModo = false;
+try { earnModo = localStorage.getItem('earnModo') === '1'; } catch (e) { /* sin storage */ }
+const fmtMini = (n) => `$${n.toFixed(n >= 1 ? 4 : 8)}`;
+function aplicarModoEarn() {
+  const grid = $('poPairBlocks');
+  if (grid) grid.classList.toggle('modo-earn', earnModo);
+  const b = $('poEarnToggle');
+  if (b) b.textContent = earnModo ? '📊 Ver compras' : '💰 Ver ganancias de Earn';
+  const r = $('poEarnResumen');
+  if (r) r.style.display = earnModo ? '' : 'none';
+}
+function toggleEarn() {
+  earnModo = !earnModo;
+  try { localStorage.setItem('earnModo', earnModo ? '1' : '0'); } catch (e) { /* ok */ }
+  aplicarModoEarn();
+}
+function renderEarnPanes(pares) {
+  if (!earnData) return;
+  for (const pair of Object.keys(pares || {})) {
+    const el = $(`${pairIdPrefix(pair)}-earn`);
+    if (!el) continue;
+    const base = pair.split('/')[0];
+    const e = earnData.items[base];
+    if (!e) { el.innerHTML = `<div class="stat-note">${esc(base)} no está en Earn ahora mismo.<br>Usa <b>/earn ${esc(base.toLowerCase())}</b> en Telegram.</div>`; continue; }
+    el.innerHTML = `
+      ${kv('En Earn', `${e.cantidad.toFixed(6)} ${esc(base)}`)}
+      ${kv('Valor', fmtUsd(e.valorUsd))}
+      ${kv('APR', `${e.aprPct}%`)}
+      <hr>
+      ${kv('Ganado total', `<span data-earn-live="${esc(base)}">—</span>`, 'pnl-pos')}
+      ${kv('Equivale a', `<span data-earn-live-usd="${esc(base)}">—</span>`, 'pnl-pos')}
+      ${kv('Ritmo por día', fmtMini(e.porDiaUsd))}`;
+  }
+  tickEarn();
+}
+function renderEarnResumen() {
+  const r = $('poEarnResumen');
+  if (!r || !earnData) return;
+  const u = earnData.items.USDT;
+  r.innerHTML = `<div class="card" style="margin-bottom:14px;">
+    <div class="card-title">💰 Ganancias de Earn — en vivo</div>
+    ${kv('Total en Earn (monedas + USDT)', fmtUsd(earnData.totalUsd))}
+    ${kv('Ganado acumulado', `<span id="earnTotalLive">—</span>`, 'pnl-pos')}
+    ${kv('Ritmo actual', `${fmtMini(earnData.porDiaUsd)} al día`)}
+    ${u ? kv('USDT en Earn', `${fmtUsd(u.valorUsd)} · APR ${u.aprPct}% · ganado ${fmtMini(u.acumuladoUsd)}`) : ''}
+  </div>`;
+  tickEarn();
+}
+function tickEarn() {
+  if (!earnData) return;
+  const seg = Math.max(0, (Date.now() - earnData.ts) / 1000);
+  for (const [base, e] of Object.entries(earnData.items)) {
+    const ganado = e.acumulado + e.porSegundo * seg;
+    const a = document.querySelector(`[data-earn-live="${base}"]`);
+    if (a) a.textContent = `${ganado.toFixed(8)} ${base}`;
+    const b = document.querySelector(`[data-earn-live-usd="${base}"]`);
+    if (b) b.textContent = fmtMini(ganado * e.precioUsd);
+  }
+  const t = $('earnTotalLive');
+  if (t) t.textContent = fmtMini(earnData.acumuladoUsd + earnData.porSegundoUsd * seg);
+}
+setInterval(tickEarn, 1000);
 let poPairKeys = null;
 function renderAccumulationPathIncremental(pares) {
   const pairEntries = Object.entries(pares);
@@ -509,6 +581,8 @@ function renderAccumulationPathIncremental(pares) {
     $('poPairBlocks').innerHTML = pairEntries.map(([pair]) => accumulationPairBlockSkeleton(pair, pairIdPrefix(pair))).join('');
   }
   pairEntries.forEach(([pair, p]) => updateAccumulationPairBlock(pairIdPrefix(pair), p));
+  aplicarModoEarn();
+  renderEarnPanes(pares);
 }
 
 function estadoGeneralThoughts(pensamientos) {
@@ -634,7 +708,8 @@ function posicionesSkeleton() {
     <div id="poErrorBanner"></div>
     <div id="poRealBalancePanel"></div>
     <div id="poThoughtsPanel"></div>
-    <div class="section-title">Accumulation Path</div>
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">Accumulation Path <button id="poEarnToggle" class="earn-toggle" onclick="toggleEarn()">💰 Ver ganancias de Earn</button></div>
+    <div id="poEarnResumen" style="display:none;"></div>
     <div class="pair-grid" id="poPairBlocks"><div class="empty-state">Cargando…</div></div>
     <div class="section-title">Configuración de la estrategia</div>
     <div class="stat-row" id="poConfigStats"></div>
@@ -649,6 +724,7 @@ async function refreshPosiciones() {
   try {
     const id = await getBot4Id();
     if (id === null) throw new Error('bot no encontrado');
+    fetchJson('/api/bot/4/earn').then((d) => { earnData = d; renderEarnResumen(); renderEarnPanes(poUltimosPares); }).catch(() => {});
     const [bot, real, thoughts, path] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson('/api/bot/4/balance-real').catch(() => null),
@@ -714,6 +790,7 @@ async function refreshPosiciones() {
 
     $('poThoughtsPanel').innerHTML = thoughts ? renderThoughtsPanel(thoughts) : '';
 
+    poUltimosPares = path.pares;
     renderAccumulationPathIncremental(path.pares);
 
     $('poConfigStats').innerHTML = [

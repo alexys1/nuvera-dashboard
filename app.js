@@ -79,6 +79,7 @@ const CACHE_TTL_MS = {
   '/api/bot/4/balance-real': CACHE_TTL_CRITICAL,
   '/api/bot/4/thoughts': CACHE_TTL_CRITICAL,
   '/api/bot/4/earn': CACHE_TTL_CRITICAL,
+  '/api/bot/4/chanchito': CACHE_TTL_CRITICAL,
   '/api/bot/4/earn/historial': CACHE_TTL_CRITICAL,
   '/api/bot/4/cycles': CACHE_TTL_DCA_TRADES,
   '/api/bot/4/fees-metricas': CACHE_TTL_GENERAL,
@@ -297,6 +298,7 @@ function inicioSkeleton() {
       <div id="inChartPlaceholder" class="chart-placeholder">Cargando gráfica…</div>
       <div id="inChartContainer" class="chart-el" style="display:none;"></div>
     </div>
+    <div class="card chanchito-card" id="inChanchito" style="display:none;"></div>
     <div class="card racha-card" id="inRachaCard" style="display:none;"></div>
     <div class="card">
       <div class="card-title">🕒 Actividad reciente</div>
@@ -409,17 +411,61 @@ function renderActivityFeed(positions, cycles) {
     : events.map(activityEventHtml).join('');
 }
 
+
+// ---------- Chanchito: BTC guardado de la ganancia de cada TP, meta 1 BTC ----------
+function chanchitoSvg(pct) {
+  // El nivel sube con el % real de la meta; mínimo 3% visible para que se vea el agua aunque recién empiece.
+  const nivel = Math.min(100, Math.max(3, pct));
+  const y = 118 - (nivel / 100) * 84; // cuerpo del chancho: de y=34 a y=118
+  return `
+    <svg viewBox="0 0 200 150" class="chanchito-svg" role="img" aria-label="Chanchito de BTC">
+      <defs><clipPath id="chBody"><ellipse cx="98" cy="76" rx="68" ry="44"/></clipPath></defs>
+      <ellipse cx="98" cy="76" rx="68" ry="44" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
+      <g clip-path="url(#chBody)"><rect class="ch-agua" x="20" y="${y.toFixed(1)}" width="160" height="100" fill="#f3ba2f" opacity="0.85"/></g>
+      <path d="M52 40 L44 20 L70 34 Z" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3" stroke-linejoin="round"/>
+      <ellipse cx="164" cy="80" rx="14" ry="11" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
+      <circle cx="160" cy="78" r="2" fill="#f3ba2f"/><circle cx="168" cy="78" r="2" fill="#f3ba2f"/>
+      <circle cx="136" cy="62" r="3.5" fill="#eef0f5"/>
+      <rect x="64" y="112" width="14" height="22" rx="5" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
+      <rect x="114" y="112" width="14" height="22" rx="5" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
+      <path d="M30 70 q-14 -4 -10 -18" fill="none" stroke="#f3ba2f" stroke-width="3" stroke-linecap="round"/>
+      <rect x="86" y="30" width="26" height="5" rx="2.5" fill="#0a0a0f" stroke="#f3ba2f" stroke-width="1.5"/>
+      <text x="99" y="22" text-anchor="middle" font-size="16" fill="#f3ba2f" font-weight="800">₿</text>
+    </svg>`;
+}
+function renderChanchito(c) {
+  const el = $('inChanchito');
+  if (!el) return;
+  if (!c || !c.activo) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const sats = Number(c.sats).toLocaleString('en-US');
+  el.innerHTML = `
+    <div class="card-title">🐷 Chanchito de BTC — meta 1 BTC</div>
+    <div class="chanchito-body">
+      ${chanchitoSvg(c.pctMeta)}
+      <div class="chanchito-info">
+        <div class="chanchito-btc">${Number(c.btc).toFixed(8)} <span>BTC</span></div>
+        <div class="stat-note">${sats} sats · ${c.valorUsd === null ? '—' : fmtUsdPrecise(c.valorUsd, 2)}</div>
+        <div class="chanchito-barra"><div style="width:${Math.max(0.5, Math.min(100, c.pctMeta))}%"></div></div>
+        <div class="stat-note">${Number(c.pctMeta).toFixed(4)}% de 1 BTC${c.metaUsd ? ` (≈ ${fmtUsdPrecise(c.metaUsd, 0)})` : ''}</div>
+        <div class="stat-note">En cada venta con ganancia, la mitad de la ganancia se queda en BTC.</div>
+      </div>
+    </div>`;
+}
+
 async function refreshInicio() {
   try {
     const id = await getBot4Id();
     if (id === null) throw new Error('bot no encontrado');
-    const [bot, real, racha, positions, cycles] = await Promise.all([
+    const [bot, real, racha, positions, cycles, chanchito] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson('/api/bot/4/balance-real').catch(() => null),
       fetchJson('/api/racha').catch(() => null),
       fetchJson(`/api/competition/bot/${id}/positions`).catch(() => []),
       fetchJson('/api/bot/4/cycles').catch(() => []),
+      fetchJson('/api/bot/4/chanchito').catch(() => null),
     ]);
+    renderChanchito(chanchito);
     const isLive = real && real.live;
     const capital = isLive ? real.capitalRealTotal : bot.capitalActual;
     const pnlUsd = isLive ? real.pnlUsd : bot.pnl;

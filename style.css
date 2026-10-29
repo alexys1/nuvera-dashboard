@@ -314,3 +314,13 @@ table.data-table td { padding: 8px; border-top: 1px solid var(--border); }
 .pair-grid.modo-earn .pane-earn { display: block; }
 .earn-toggle { font: inherit; font-size: 12.5px; font-weight: 700; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border-solid); background: var(--surface); color: var(--text); cursor: pointer; text-transform: none; letter-spacing: 0; }
 .earn-toggle:hover { background: var(--surface-2); }
+
+/* Chanchito de BTC */
+.chanchito-body { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.chanchito-svg { width: 190px; max-width: 46%; flex: none; }
+.ch-agua { transition: y 1.2s ease; }
+.chanchito-info { flex: 1; min-width: 200px; }
+.chanchito-btc { font-size: 26px; font-weight: 800; color: var(--accent); letter-spacing: -0.3px; }
+.chanchito-btc span { font-size: 14px; color: var(--text-dim); font-weight: 600; }
+.chanchito-barra { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
+.chanchito-barra > div { height: 100%; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); border-radius: 99px; transition: width 1.2s ease; }

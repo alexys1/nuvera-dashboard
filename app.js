@@ -412,7 +412,25 @@ function renderActivityFeed(positions, cycles) {
 
 
 // ---------- Chanchito: BTC guardado de la ganancia de cada TP, meta 1 BTC ----------
-// El SVG se arma UNA vez (para no reiniciar las animaciones CSS en cada refresco); después solo se actualizan los textos y el nivel.
+// Chancho rosado de vidrio (transparente) con monedas ₿ adentro: 1 moneda = 10,000 sats, se van apilando de abajo hacia arriba.
+const CH_SATS_POR_MONEDA = 10000;
+const CH_MAX_MONEDAS = 40;
+// Posiciones de las monedas dentro del cuerpo (elipse cx=145 cy=122 rx=100 ry=68), de abajo hacia arriba, con una variación fija.
+const CH_POS = (() => {
+  const out = []; const cx = 145; const cy = 122; const rx = 94; const ry = 62; const r = 9.5;
+  let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let row = 0; out.length < CH_MAX_MONEDAS && row < 12; row++) {
+    const y = cy + ry - 8 - row * 14.5;
+    const dy = (y - cy) / ry; if (Math.abs(dy) >= 1) break;
+    const half = rx * Math.sqrt(1 - dy * dy) - r;
+    const n = Math.max(1, Math.floor((half * 2) / 19) + 1);
+    const step = n > 1 ? (half * 2) / (n - 1) : 0;
+    for (let k = 0; k < n && out.length < CH_MAX_MONEDAS; k++) {
+      out.push({ x: cx - half + k * step + (rnd() - 0.5) * 3 + (row % 2 ? 3 : -3), y: y + (rnd() - 0.5) * 3, rot: Math.round((rnd() - 0.5) * 30) });
+    }
+  }
+  return out;
+})();
 function chanchitoBuildHtml() {
   return `
     <div class="card-title">🐷 Chanchito de BTC — meta 1 BTC</div>
@@ -422,34 +440,80 @@ function chanchitoBuildHtml() {
           <circle cx="60" cy="60" r="56" fill="none" stroke="#2a2a38" stroke-width="4"/>
           <circle id="chAnillo" cx="60" cy="60" r="56" fill="none" stroke="#f3ba2f" stroke-width="4" stroke-linecap="round" stroke-dasharray="351.86" stroke-dashoffset="351.86" transform="rotate(-90 60 60)"/>
         </svg>
-        <div id="chLottie" class="ch-lottie"><img src="assets/chanchito-poster.png" alt="Chanchito" width="100%"></div>
+        <svg class="ch-pig" viewBox="0 0 300 250" role="img" aria-label="Chanchito de BTC con monedas">
+          <defs>
+            <radialGradient id="chVidrio" cx="0.32" cy="0.25" r="0.9">
+              <stop offset="0" stop-color="#ffe0ea" stop-opacity="0.55"/><stop offset="0.55" stop-color="#ff9dbd" stop-opacity="0.26"/><stop offset="1" stop-color="#ff5f93" stop-opacity="0.34"/>
+            </radialGradient>
+            <linearGradient id="chRosa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc2d6"/><stop offset="1" stop-color="#f06d9b"/></linearGradient>
+            <radialGradient id="chHocico" cx="0.35" cy="0.3" r="0.9"><stop offset="0" stop-color="#ffd3e1"/><stop offset="0.6" stop-color="#ff8fb5"/><stop offset="1" stop-color="#d94d84"/></radialGradient>
+            <radialGradient id="chOro" cx="0.35" cy="0.3" r="0.85"><stop offset="0" stop-color="#fff3b8"/><stop offset="0.55" stop-color="#f7c23a"/><stop offset="1" stop-color="#b57d00"/></radialGradient>
+            <clipPath id="chCuerpo"><ellipse cx="145" cy="122" rx="100" ry="68"/></clipPath>
+            <g id="chMoneda">
+              <circle r="9.5" fill="url(#chOro)" stroke="#a87400" stroke-width="1.2"/>
+              <circle r="6.6" fill="none" stroke="#b57d00" stroke-opacity="0.55" stroke-width="0.8"/>
+              <text y="3.6" text-anchor="middle" font-size="10.5" font-weight="800" font-family="Arial,sans-serif" fill="#7a5200">B</text>
+              <path d="M-1.6 -6.4 v2.2 M1.6 -6.4 v2.2 M-1.6 4.4 v2.2 M1.6 4.4 v2.2" stroke="#7a5200" stroke-width="0.9" stroke-linecap="round"/>
+            </g>
+          </defs>
+          <ellipse cx="148" cy="236" rx="100" ry="9" fill="#000" opacity="0.4"/>
+          <g class="ch-flota">
+            <rect x="82" y="168" width="30" height="58" rx="14" fill="url(#chRosa)"/>
+            <rect x="178" y="168" width="30" height="58" rx="14" fill="url(#chRosa)"/>
+            <path d="M48 118 q-30 -4 -22 -30 q6 18 22 14" fill="none" stroke="#f58ab0" stroke-width="7" stroke-linecap="round"/>
+            <path d="M196 62 L204 22 L236 60 Z" fill="url(#chRosa)" stroke="#e8628f" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M206 56 L210 36 L224 56 Z" fill="#ff9fc0" opacity="0.7"/>
+            <ellipse cx="145" cy="122" rx="100" ry="68" fill="url(#chVidrio)"/>
+            <g clip-path="url(#chCuerpo)"><g id="chMonedas"></g></g>
+            <ellipse cx="145" cy="122" rx="100" ry="68" fill="none" stroke="#ffb3cc" stroke-width="4"/>
+            <ellipse cx="145" cy="122" rx="96" ry="64" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="2"/>
+            <path d="M70 92 Q82 62 126 52" fill="none" stroke="#fff" stroke-opacity="0.75" stroke-width="6" stroke-linecap="round" class="ch-brillo"/>
+            <path d="M100 176 Q145 192 196 178" fill="none" stroke="#fff" stroke-opacity="0.28" stroke-width="4" stroke-linecap="round"/>
+            <ellipse cx="248" cy="128" rx="26" ry="21" fill="url(#chHocico)" stroke="#d94d84" stroke-width="2"/>
+            <ellipse cx="242" cy="128" rx="3.4" ry="5.2" fill="#8a2750"/><ellipse cx="256" cy="128" rx="3.4" ry="5.2" fill="#8a2750"/>
+            <g class="ch-ojo"><ellipse cx="214" cy="98" rx="5" ry="6.4" fill="#2a1020"/><circle cx="215.6" cy="95.8" r="1.8" fill="#fff"/></g>
+            <ellipse cx="206" cy="116" rx="9" ry="5.5" fill="#ff5f93" opacity="0.45"/>
+            <rect x="118" y="50" width="54" height="8" rx="4" fill="#3a1228"/>
+          </g>
+          <g class="ch-cae"><use href="#chMoneda" x="145" y="0"/></g>
+          <path class="ch-chispa c1" d="M36 40 l3 9 9 3 -9 3 -3 9 -3 -9 -9 -3 9 -3 z" fill="#ffe27a"/>
+          <path class="ch-chispa c2" d="M268 62 l2 7 7 2 -7 2 -2 7 -2 -7 -7 -2 7 -2 z" fill="#fff"/>
+        </svg>
       </div>
       <div class="chanchito-info">
         <div class="chanchito-btc"><span id="chBtc">0.00000000</span> <span class="u">BTC</span></div>
         <div class="stat-note" id="chSub">—</div>
         <div class="chanchito-barra"><div id="chBarra" style="width:0.5%"></div></div>
         <div class="stat-note" id="chPct">—</div>
-        <div class="stat-note">En cada venta con ganancia, la mitad de la ganancia se queda en BTC. Al juntar 0.0015 BTC pasa solo a Earn.</div>
+        <div class="stat-note">🪙 Cada moneda = ${CH_SATS_POR_MONEDA.toLocaleString('en-US')} sats. En cada venta con ganancia, la mitad de la ganancia se queda en BTC; al juntar 0.0015 BTC pasa solo a Earn.</div>
       </div>
     </div>`;
+}
+let chMonedasMostradas = 0;
+function chanchitoActualizarMonedas(sats) {
+  const g = $('chMonedas');
+  if (!g) return;
+  const n = sats > 0 ? Math.min(CH_MAX_MONEDAS, Math.max(1, Math.ceil(sats / CH_SATS_POR_MONEDA))) : 0;
+  if (n < chMonedasMostradas) { g.innerHTML = ''; chMonedasMostradas = 0; }
+  for (let i = chMonedasMostradas; i < n; i++) {
+    const p = CH_POS[i];
+    const u = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    u.setAttribute('href', '#chMoneda');
+    u.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) rotate(${p.rot})`);
+    if (chMonedasMostradas > 0 || g.dataset.listo) u.setAttribute('class', 'ch-nueva');
+    g.appendChild(u);
+  }
+  chMonedasMostradas = n;
+  g.dataset.listo = '1';
 }
 function renderChanchito(c) {
   const el = $('poChanchito');
   if (!el) return;
   if (!c || !c.activo) { el.style.display = 'none'; return; }
   el.style.display = 'block';
-  if (!el.dataset.built) {
-    el.innerHTML = chanchitoBuildHtml(); el.dataset.built = '1';
-    // Animación Lottie (chanchito 3D con moneda cayendo, LottieFiles "Piggy Bank" 3D, Bas van Breugel, Lottie Simple License).
-    const iniciar = () => {
-      if (!window.lottie) return false;
-      $('chLottie').innerHTML = '';
-      window.lottie.loadAnimation({ container: $('chLottie'), renderer: 'svg', loop: true, autoplay: true, path: 'assets/chanchito.json' });
-      return true;
-    };
-    if (!iniciar()) { const t = setInterval(() => { if (iniciar()) clearInterval(t); }, 500); setTimeout(() => clearInterval(t), 15000); }
-  }
+  if (!el.dataset.built) { el.innerHTML = chanchitoBuildHtml(); el.dataset.built = '1'; chMonedasMostradas = 0; }
   $('chAnillo').style.strokeDashoffset = (351.86 * (1 - Math.min(100, Math.max(0, c.pctMeta)) / 100)).toFixed(2);
+  chanchitoActualizarMonedas(Number(c.sats) || 0);
   $('chBtc').textContent = Number(c.btc).toFixed(8);
   $('chSub').textContent = `${Number(c.sats).toLocaleString('en-US')} sats · ${c.valorUsd === null ? '—' : fmtUsdPrecise(c.valorUsd, 2)}`;
   $('chBarra').style.width = `${Math.max(0.5, Math.min(100, c.pctMeta))}%`;

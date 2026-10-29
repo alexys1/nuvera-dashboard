@@ -322,11 +322,24 @@ table.data-table td { padding: 8px; border-top: 1px solid var(--border); }
 .ch-stage::before { content: ""; position: absolute; inset: 14px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #2c2612 0%, #1b1b27 70%); box-shadow: 0 0 40px rgba(243,186,47,0.12) inset; }
 .ch-anillo { position: absolute; inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 0 6px rgba(243,186,47,0.55)); }
 #chAnillo { transition: stroke-dashoffset 1.6s cubic-bezier(.2,.8,.2,1); }
-.ch-lottie { position: relative; width: 86%; height: 86%; filter: drop-shadow(0 10px 14px rgba(0,0,0,0.45)); }
+.ch-pig { position: relative; width: 88%; height: auto; overflow: visible; filter: drop-shadow(0 8px 12px rgba(0,0,0,0.4)); }
+.ch-flota { animation: chFlota 4.5s ease-in-out infinite; transform-origin: 145px 200px; }
+.ch-ojo { transform-origin: 214px 98px; animation: chParpadeo 5s infinite; }
+.ch-brillo { animation: chBrillo 4s ease-in-out infinite; }
+.ch-cae { animation: chCae 4.2s ease-in infinite; opacity: 0; }
+.ch-nueva { animation: chAparece 0.9s cubic-bezier(.3,1.4,.5,1) both; }
+.ch-chispa { transform-box: fill-box; transform-origin: center; animation: chChispa 3s ease-in-out infinite; }
+.ch-chispa.c2 { animation-delay: 1.4s; }
+@keyframes chFlota { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-4px) rotate(-0.7deg); } }
+@keyframes chParpadeo { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+@keyframes chBrillo { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+@keyframes chCae { 0% { opacity: 0; transform: translateY(-8px); } 12% { opacity: 1; } 55% { opacity: 1; transform: translateY(62px); } 62% { opacity: 0; transform: translateY(70px); } 100% { opacity: 0; transform: translateY(70px); } }
+@keyframes chAparece { from { opacity: 0; translate: 0 -40px; } to { opacity: 1; translate: 0 0; } }
+@keyframes chChispa { 0%,100% { transform: scale(0) rotate(0); opacity: 0; } 50% { transform: scale(1) rotate(45deg); opacity: 1; } }
 .chanchito-info { flex: 1; min-width: 220px; }
 .chanchito-btc { font-size: 28px; font-weight: 800; color: var(--accent); letter-spacing: -0.3px; font-variant-numeric: tabular-nums; }
 .chanchito-btc .u { font-size: 14px; color: var(--text-dim); font-weight: 600; }
 .chanchito-barra { height: 9px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
 .chanchito-barra > div { height: 100%; background: linear-gradient(90deg, var(--accent-dim), #ffe27a, var(--accent)); background-size: 200% 100%; border-radius: 99px; transition: width 1.2s ease; animation: chBrilloBarra 3s linear infinite; }
 @keyframes chBrilloBarra { from { background-position: 0 0; } to { background-position: 200% 0; } }
-@media (prefers-reduced-motion: reduce) { .chanchito-barra > div { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .chanchito-barra > div, .ch-pig * { animation: none !important; } }

@@ -440,7 +440,7 @@ function renderChanchito(c) {
   el.style.display = 'block';
   if (!el.dataset.built) {
     el.innerHTML = chanchitoBuildHtml(); el.dataset.built = '1';
-    // Animación Lottie (cerdito con moneda cayendo, LottieFiles / Vladislav Sholohov, Lottie Simple License).
+    // Animación Lottie (chanchito 3D con moneda cayendo, LottieFiles "Piggy Bank" 3D, Bas van Breugel, Lottie Simple License).
     const iniciar = () => {
       if (!window.lottie) return false;
       $('chLottie').innerHTML = '';

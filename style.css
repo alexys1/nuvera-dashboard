@@ -322,7 +322,7 @@ table.data-table td { padding: 8px; border-top: 1px solid var(--border); }
 .ch-stage::before { content: ""; position: absolute; inset: 14px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #2c2612 0%, #1b1b27 70%); box-shadow: 0 0 40px rgba(243,186,47,0.12) inset; }
 .ch-anillo { position: absolute; inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 0 6px rgba(243,186,47,0.55)); }
 #chAnillo { transition: stroke-dashoffset 1.6s cubic-bezier(.2,.8,.2,1); }
-.ch-lottie { position: relative; width: 82%; height: 82%; }
+.ch-lottie { position: relative; width: 86%; height: 86%; filter: drop-shadow(0 10px 14px rgba(0,0,0,0.45)); }
 .chanchito-info { flex: 1; min-width: 220px; }
 .chanchito-btc { font-size: 28px; font-weight: 800; color: var(--accent); letter-spacing: -0.3px; font-variant-numeric: tabular-nums; }
 .chanchito-btc .u { font-size: 14px; color: var(--text-dim); font-weight: 600; }

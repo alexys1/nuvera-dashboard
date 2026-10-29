@@ -298,7 +298,6 @@ function inicioSkeleton() {
       <div id="inChartPlaceholder" class="chart-placeholder">Cargando gráfica…</div>
       <div id="inChartContainer" class="chart-el" style="display:none;"></div>
     </div>
-    <div class="card chanchito-card" id="inChanchito" style="display:none;"></div>
     <div class="card racha-card" id="inRachaCard" style="display:none;"></div>
     <div class="card">
       <div class="card-title">🕒 Actividad reciente</div>
@@ -413,59 +412,102 @@ function renderActivityFeed(positions, cycles) {
 
 
 // ---------- Chanchito: BTC guardado de la ganancia de cada TP, meta 1 BTC ----------
-function chanchitoSvg(pct) {
-  // El nivel sube con el % real de la meta; mínimo 3% visible para que se vea el agua aunque recién empiece.
-  const nivel = Math.min(100, Math.max(3, pct));
-  const y = 118 - (nivel / 100) * 84; // cuerpo del chancho: de y=34 a y=118
+// El SVG se arma UNA vez (para no reiniciar las animaciones CSS en cada refresco); después solo se actualizan los textos y el nivel.
+function chanchitoBuildHtml() {
   return `
-    <svg viewBox="0 0 200 150" class="chanchito-svg" role="img" aria-label="Chanchito de BTC">
-      <defs><clipPath id="chBody"><ellipse cx="98" cy="76" rx="68" ry="44"/></clipPath></defs>
-      <ellipse cx="98" cy="76" rx="68" ry="44" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
-      <g clip-path="url(#chBody)"><rect class="ch-agua" x="20" y="${y.toFixed(1)}" width="160" height="100" fill="#f3ba2f" opacity="0.85"/></g>
-      <path d="M52 40 L44 20 L70 34 Z" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3" stroke-linejoin="round"/>
-      <ellipse cx="164" cy="80" rx="14" ry="11" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
-      <circle cx="160" cy="78" r="2" fill="#f3ba2f"/><circle cx="168" cy="78" r="2" fill="#f3ba2f"/>
-      <circle cx="136" cy="62" r="3.5" fill="#eef0f5"/>
-      <rect x="64" y="112" width="14" height="22" rx="5" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
-      <rect x="114" y="112" width="14" height="22" rx="5" fill="#1e1e2b" stroke="#f3ba2f" stroke-width="3"/>
-      <path d="M30 70 q-14 -4 -10 -18" fill="none" stroke="#f3ba2f" stroke-width="3" stroke-linecap="round"/>
-      <rect x="86" y="30" width="26" height="5" rx="2.5" fill="#0a0a0f" stroke="#f3ba2f" stroke-width="1.5"/>
-      <text x="99" y="22" text-anchor="middle" font-size="16" fill="#f3ba2f" font-weight="800">₿</text>
-    </svg>`;
+    <div class="card-title">🐷 Chanchito de BTC — meta 1 BTC</div>
+    <div class="chanchito-body">
+      <div class="ch-stage">
+        <svg viewBox="0 0 240 190" class="chanchito-svg" role="img" aria-label="Chanchito de BTC">
+          <defs>
+            <linearGradient id="chGlass" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#ffb3c7" stop-opacity="0.38"/><stop offset="1" stop-color="#ff7aa2" stop-opacity="0.18"/>
+            </linearGradient>
+            <linearGradient id="chGold" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#ffe27a"/><stop offset="0.55" stop-color="#f3ba2f"/><stop offset="1" stop-color="#b8860b"/>
+            </linearGradient>
+            <linearGradient id="chRim" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#ffd4e0"/><stop offset="1" stop-color="#ff6f9a"/>
+            </linearGradient>
+            <radialGradient id="chCoin" cx="0.35" cy="0.3" r="0.8">
+              <stop offset="0" stop-color="#fff2b0"/><stop offset="0.6" stop-color="#f3ba2f"/><stop offset="1" stop-color="#a87400"/>
+            </radialGradient>
+            <radialGradient id="chGlow" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0" stop-color="#f3ba2f" stop-opacity="0.35"/><stop offset="1" stop-color="#f3ba2f" stop-opacity="0"/>
+            </radialGradient>
+            <clipPath id="chBody"><ellipse cx="112" cy="104" rx="76" ry="52"/></clipPath>
+          </defs>
+          <ellipse cx="120" cy="104" rx="112" ry="82" fill="url(#chGlow)" class="ch-glow"/>
+          <ellipse cx="116" cy="176" rx="64" ry="7" fill="#000" opacity="0.35"/>
+          <g class="ch-float">
+            <!-- patas, cola, orejas -->
+            <rect x="68" y="138" width="20" height="30" rx="8" fill="url(#chRim)"/>
+            <rect x="124" y="138" width="20" height="30" rx="8" fill="url(#chRim)"/>
+            <path d="M38 96 q-22 -2 -18 -22 q4 14 16 8" fill="none" stroke="#ff8fb0" stroke-width="5" stroke-linecap="round"/>
+            <path d="M70 66 L62 38 L96 56 Z" fill="url(#chRim)" stroke="#ff6f9a" stroke-width="2" stroke-linejoin="round"/>
+            <!-- cuerpo de vidrio + oro líquido -->
+            <ellipse cx="112" cy="104" rx="76" ry="52" fill="url(#chGlass)"/>
+            <g clip-path="url(#chBody)">
+              <g id="chLiquido" style="transform:translateY(160px)">
+                <g class="ch-ola ch-ola-a"><path d="M-240 0 Q-210 -9 -180 0 T-120 0 T-60 0 T0 0 T60 0 T120 0 T180 0 T240 0 T300 0 V120 H-240 Z" fill="url(#chGold)" opacity="0.55"/></g>
+                <g class="ch-ola ch-ola-b"><path d="M-240 0 Q-210 -7 -180 0 T-120 0 T-60 0 T0 0 T60 0 T120 0 T180 0 T240 0 T300 0 V120 H-240 Z" fill="url(#chGold)"/></g>
+              </g>
+              <circle class="ch-burb b1" cx="90" cy="150" r="2.4" fill="#fff6c9"/>
+              <circle class="ch-burb b2" cx="120" cy="150" r="1.8" fill="#fff6c9"/>
+              <circle class="ch-burb b3" cx="146" cy="150" r="2.8" fill="#fff6c9"/>
+            </g>
+            <ellipse cx="112" cy="104" rx="76" ry="52" fill="none" stroke="url(#chRim)" stroke-width="3.5"/>
+            <path d="M58 84 Q66 62 96 54" fill="none" stroke="#fff" stroke-opacity="0.65" stroke-width="4" stroke-linecap="round" class="ch-brillo"/>
+            <!-- hocico, ojo, ranura -->
+            <ellipse cx="186" cy="108" rx="17" ry="14" fill="url(#chRim)" stroke="#ff6f9a" stroke-width="2"/>
+            <ellipse cx="181" cy="108" rx="2.6" ry="4" fill="#9b2c52"/><ellipse cx="192" cy="108" rx="2.6" ry="4" fill="#9b2c52"/>
+            <g class="ch-ojo"><ellipse cx="156" cy="86" rx="4" ry="5" fill="#2a1020"/><circle cx="157.2" cy="84.2" r="1.4" fill="#fff"/></g>
+            <rect x="94" y="54" width="34" height="6" rx="3" fill="#2a1020"/>
+          </g>
+          <!-- monedas que caen por la ranura -->
+          <g class="ch-moneda m1"><circle r="10" fill="url(#chCoin)" stroke="#a87400" stroke-width="1.5"/><text y="4.5" text-anchor="middle" font-size="12" font-weight="800" font-family="Arial,sans-serif" fill="#7a5200">B</text></g>
+          <g class="ch-moneda m2"><circle r="8" fill="url(#chCoin)" stroke="#a87400" stroke-width="1.5"/><text y="3.8" text-anchor="middle" font-size="10" font-weight="800" font-family="Arial,sans-serif" fill="#7a5200">B</text></g>
+          <!-- destellos -->
+          <path class="ch-chispa c1" d="M30 40 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3 z" fill="#ffe27a"/>
+          <path class="ch-chispa c2" d="M212 54 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2 z" fill="#fff"/>
+          <path class="ch-chispa c3" d="M200 150 l2 5 5 2 -5 2 -2 5 -2 -5 -5 -2 5 -2 z" fill="#ffe27a"/>
+        </svg>
+      </div>
+      <div class="chanchito-info">
+        <div class="chanchito-btc"><span id="chBtc">0.00000000</span> <span class="u">BTC</span></div>
+        <div class="stat-note" id="chSub">—</div>
+        <div class="chanchito-barra"><div id="chBarra" style="width:0.5%"></div></div>
+        <div class="stat-note" id="chPct">—</div>
+        <div class="stat-note">En cada venta con ganancia, la mitad de la ganancia se queda en BTC. Al juntar 0.0015 BTC pasa solo a Earn.</div>
+      </div>
+    </div>`;
 }
 function renderChanchito(c) {
-  const el = $('inChanchito');
+  const el = $('poChanchito');
   if (!el) return;
   if (!c || !c.activo) { el.style.display = 'none'; return; }
   el.style.display = 'block';
-  const sats = Number(c.sats).toLocaleString('en-US');
-  el.innerHTML = `
-    <div class="card-title">🐷 Chanchito de BTC — meta 1 BTC</div>
-    <div class="chanchito-body">
-      ${chanchitoSvg(c.pctMeta)}
-      <div class="chanchito-info">
-        <div class="chanchito-btc">${Number(c.btc).toFixed(8)} <span>BTC</span></div>
-        <div class="stat-note">${sats} sats · ${c.valorUsd === null ? '—' : fmtUsdPrecise(c.valorUsd, 2)}</div>
-        <div class="chanchito-barra"><div style="width:${Math.max(0.5, Math.min(100, c.pctMeta))}%"></div></div>
-        <div class="stat-note">${Number(c.pctMeta).toFixed(4)}% de 1 BTC${c.metaUsd ? ` (≈ ${fmtUsdPrecise(c.metaUsd, 0)})` : ''}</div>
-        <div class="stat-note">En cada venta con ganancia, la mitad de la ganancia se queda en BTC.</div>
-      </div>
-    </div>`;
+  if (!el.dataset.built) { el.innerHTML = chanchitoBuildHtml(); el.dataset.built = '1'; }
+  const nivel = Math.min(100, Math.max(6, c.pctMeta)); // mínimo visual: el oro siempre se ve en el fondo
+  // cuerpo del chancho: de y=52 (arriba) a y=156 (abajo)
+  $('chLiquido').style.transform = `translateY(${(156 - (nivel / 100) * 104).toFixed(1)}px)`;
+  $('chBtc').textContent = Number(c.btc).toFixed(8);
+  $('chSub').textContent = `${Number(c.sats).toLocaleString('en-US')} sats · ${c.valorUsd === null ? '—' : fmtUsdPrecise(c.valorUsd, 2)}`;
+  $('chBarra').style.width = `${Math.max(0.5, Math.min(100, c.pctMeta))}%`;
+  $('chPct').textContent = `${Number(c.pctMeta).toFixed(4)}% de 1 BTC${c.metaUsd ? ` (≈ ${fmtUsdPrecise(c.metaUsd, 0)})` : ''}`;
 }
 
 async function refreshInicio() {
   try {
     const id = await getBot4Id();
     if (id === null) throw new Error('bot no encontrado');
-    const [bot, real, racha, positions, cycles, chanchito] = await Promise.all([
+    const [bot, real, racha, positions, cycles] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson('/api/bot/4/balance-real').catch(() => null),
       fetchJson('/api/racha').catch(() => null),
       fetchJson(`/api/competition/bot/${id}/positions`).catch(() => []),
       fetchJson('/api/bot/4/cycles').catch(() => []),
-      fetchJson('/api/bot/4/chanchito').catch(() => null),
     ]);
-    renderChanchito(chanchito);
     const isLive = real && real.live;
     const capital = isLive ? real.capitalRealTotal : bot.capitalActual;
     const pnlUsd = isLive ? real.pnlUsd : bot.pnl;
@@ -812,7 +854,7 @@ function posicionesSkeleton() {
     </div>
     <div id="poErrorBanner"></div>
     <div id="poRealBalancePanel"></div>
-    <div id="poThoughtsPanel"></div>
+    <div class="card chanchito-card" id="poChanchito" style="display:none;"></div>
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">Accumulation Path <button id="poEarnToggle" class="earn-toggle" onclick="toggleEarn()">💰 Ver ganancias de Earn</button></div>
     <div id="poEarnResumen" style="display:none;"></div>
     <div class="pair-grid" id="poPairBlocks"><div class="empty-state">Cargando…</div></div>
@@ -831,10 +873,10 @@ async function refreshPosiciones() {
     if (id === null) throw new Error('bot no encontrado');
     fetchJson('/api/bot/4/earn').then((d) => { earnData = d; renderEarnResumen(); renderEarnPanes(poUltimosPares); }).catch(() => {});
     fetchJson('/api/bot/4/earn/historial').then((d) => { earnHist = d; renderEarnResumen(); }).catch(() => {});
-    const [bot, real, thoughts, path] = await Promise.all([
+    const [bot, real, chanchito, path] = await Promise.all([
       fetchJson(`/api/competition/bot/${id}`),
       fetchJson('/api/bot/4/balance-real').catch(() => null),
-      fetchJson('/api/bot/4/thoughts').catch(() => null),
+      fetchJson('/api/bot/4/chanchito').catch(() => null),
       fetchJson(`/api/bot/dca/${id}/path`),
     ]);
     // Capital Total/Invertido/Libre (2026-09-17, pedido explícito — el
@@ -894,7 +936,7 @@ async function refreshPosiciones() {
       kv('USDT disponible (Spot)', fmtUsd(real.usdtDisponible)) + earnRowHtml + posicionesHtml + kv('Capital total real', fmtUsd(real.capitalRealTotal)),
     ) : '';
 
-    $('poThoughtsPanel').innerHTML = thoughts ? renderThoughtsPanel(thoughts) : '';
+    renderChanchito(chanchito);
 
     poUltimosPares = path.pares;
     renderAccumulationPathIncremental(path.pares);

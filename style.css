@@ -316,11 +316,36 @@ table.data-table td { padding: 8px; border-top: 1px solid var(--border); }
 .earn-toggle:hover { background: var(--surface-2); }
 
 /* Chanchito de BTC */
-.chanchito-body { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-.chanchito-svg { width: 190px; max-width: 46%; flex: none; }
-.ch-agua { transition: y 1.2s ease; }
-.chanchito-info { flex: 1; min-width: 200px; }
-.chanchito-btc { font-size: 26px; font-weight: 800; color: var(--accent); letter-spacing: -0.3px; }
-.chanchito-btc span { font-size: 14px; color: var(--text-dim); font-weight: 600; }
-.chanchito-barra { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
-.chanchito-barra > div { height: 100%; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); border-radius: 99px; transition: width 1.2s ease; }
+.chanchito-card { overflow: hidden; background: radial-gradient(ellipse 420px 220px at 18% 40%, #2a2410 0%, var(--surface) 70%); }
+.chanchito-body { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+.ch-stage { flex: none; width: 240px; max-width: 100%; }
+.chanchito-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chanchito-info { flex: 1; min-width: 220px; }
+.chanchito-btc { font-size: 28px; font-weight: 800; color: var(--accent); letter-spacing: -0.3px; font-variant-numeric: tabular-nums; }
+.chanchito-btc .u { font-size: 14px; color: var(--text-dim); font-weight: 600; }
+.chanchito-barra { height: 9px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
+.chanchito-barra > div { height: 100%; background: linear-gradient(90deg, var(--accent-dim), #ffe27a, var(--accent)); background-size: 200% 100%; border-radius: 99px; transition: width 1.2s ease; animation: chBrilloBarra 3s linear infinite; }
+#chLiquido { transition: transform 1.6s cubic-bezier(.2,.8,.2,1); }
+.ch-ola { animation: chOla 5s linear infinite; }
+.ch-ola-b { animation-duration: 3.4s; animation-direction: reverse; }
+.ch-float { animation: chFlota 4s ease-in-out infinite; transform-origin: 112px 140px; }
+.ch-glow { animation: chLatido 4s ease-in-out infinite; transform-origin: 120px 104px; }
+.ch-ojo { transform-origin: 156px 86px; animation: chParpadeo 5s infinite; }
+.ch-brillo { animation: chBrillo 4s ease-in-out infinite; }
+.ch-burb { animation: chBurbuja 4s ease-in infinite; }
+.ch-burb.b2 { animation-delay: 1.3s; } .ch-burb.b3 { animation-delay: 2.5s; }
+.ch-moneda { animation: chMoneda 3.6s ease-in infinite; opacity: 0; }
+.ch-moneda.m1 { transform: translate(111px, -14px); }
+.ch-moneda.m2 { transform: translate(111px, -14px); animation-delay: 1.8s; }
+.ch-chispa { transform-box: fill-box; transform-origin: center; animation: chChispa 3s ease-in-out infinite; }
+.ch-chispa.c2 { animation-delay: 1s; } .ch-chispa.c3 { animation-delay: 2s; }
+@keyframes chOla { from { transform: translateX(0); } to { transform: translateX(120px); } }
+@keyframes chFlota { 0%,100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-4px) rotate(-0.8deg); } }
+@keyframes chLatido { 0%,100% { transform: scale(1); opacity: .8; } 50% { transform: scale(1.06); opacity: 1; } }
+@keyframes chParpadeo { 0%,92%,100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+@keyframes chBrillo { 0%,100% { opacity: .35; } 50% { opacity: .8; } }
+@keyframes chBurbuja { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: .8; } 100% { transform: translateY(-70px); opacity: 0; } }
+@keyframes chMoneda { 0% { opacity: 0; translate: 0 0; } 10% { opacity: 1; } 50% { opacity: 1; translate: 0 52px; } 60% { opacity: 0; translate: 0 62px; } 100% { opacity: 0; translate: 0 62px; } }
+@keyframes chChispa { 0%,100% { transform: scale(0) rotate(0); opacity: 0; } 50% { transform: scale(1) rotate(45deg); opacity: 1; } }
+@keyframes chBrilloBarra { from { background-position: 0 0; } to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) { .chanchito-svg *, .chanchito-barra > div { animation: none !important; } }
